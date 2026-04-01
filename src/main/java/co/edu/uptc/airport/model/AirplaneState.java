@@ -9,7 +9,7 @@ public enum AirplaneState {
     WAITING_FYI("Esperando pista"),
 
     /** Avión actualmente aterrizando o despegando en una pista */
-    ON_TRACK("En pista"),
+    ON_RUNWAY("En pista"),
 
     /** Avión trasladándose hacia la puerta */
     TOWARDS_DOOR("Hacia la puerta"),

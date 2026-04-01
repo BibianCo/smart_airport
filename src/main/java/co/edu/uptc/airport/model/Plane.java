@@ -15,7 +15,11 @@ public class Plane {
     /** Nombre descriptivo o aerolínea del avión */
     private final String namePlane;
 
-    /** Estado actual del avión en el sistema */
+    /**
+     * Estado actual del avión en el sistema
+     * se utiliza volatile para asegurar visibilidad entre hilos sin necesidad de
+     * sincronización adicional en getters
+     */
     private volatile AirplaneState statePlane;
 
     /** Número de puerta asignada (-1 si no tiene puerta) */
@@ -69,7 +73,7 @@ public class Plane {
         return assignedTrack;
     }
 
-    public synchronized void setAssignedTrack(int assignedTrack) {
+    public synchronized void setAssignedRunway(int assignedTrack) {
         this.assignedTrack = assignedTrack;
     }
 
