@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AeroSim — Aeropuerto Inteligente</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link
+        href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Syne:wght@400;600;700;800&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="css/styles.css">
+</head>
+
+<body>
+
+    <!-- ══════════════════════ HEADER ══════════════════════ -->
+    <header class="header">
+        <div class="header-inner">
+            <div class="brand">
+                <div class="brand-icon">✈</div>
+                <div class="brand-text">
+                    <span class="brand-name">AeroSim</span>
+                    <span class="brand-sub">Simulación de Sistemas Operativos · UPTC</span>
+                </div>
+            </div>
+            <div class="header-status">
+                <div class="status-pill" id="statusPill">
+                    <span class="status-dot"></span>
+                    <span id="statusText">Detenido</span>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- ══════════════════════ MAIN LAYOUT ══════════════════════ -->
+    <main class="main-grid">
+
+        <!-- ── PANEL IZQUIERDO: Control + Estadísticas ── -->
+        <aside class="panel panel-control">
+
+            <section class="card">
+                <h2 class="card-title">Control</h2>
+                <div class="btn-group vertical">
+                    <button class="btn btn-primary" id="btnIniciar" onclick="iniciarSimulacion()">
+                        <span class="btn-icon">▶</span> Iniciar Simulación
+                    </button>
+                    <button class="btn btn-secondary" id="btnDetener" onclick="detenerSimulacion()" disabled>
+                        <span class="btn-icon">■</span> Detener
+                    </button>
+                    <button class="btn btn-ghost" onclick="reiniciarSimulacion()">
+                        <span class="btn-icon">↺</span> Reiniciar
+                    </button>
+                </div>
+            </section>
+
+            <section class="card">
+                <h2 class="card-title">Agregar Avión</h2>
+                <div class="input-row">
+                    <input type="text" id="nombreAvion" class="input-field" placeholder="Aerolínea..." maxlength="20">
+                    <button class="btn btn-accent" onclick="agregarAvion()">
+                        <span class="btn-icon">+</span>
+                    </button>
+                </div>
+                <div class="aerolineas-sugeridas">
+                    <span onclick="setAerolinea('AeroCol')" class="chip">AeroCol</span>
+                    <span onclick="setAerolinea('Latam')" class="chip">Latam</span>
+                    <span onclick="setAerolinea('Avianca')" class="chip">Avianca</span>
+                    <span onclick="setAerolinea('Wingo')" class="chip">Wingo</span>
+                    <span onclick="setAerolinea('Copa')" class="chip">Copa</span>
+                </div>
+            </section>
+
+            <section class="card">
+                <h2 class="card-title">Estadísticas</h2>
+                <div class="stats-grid">
+                    <div class="stat-item">
+                        <div class="stat-value" id="statPistasLibres">—</div>
+                        <div class="stat-label">Pistas libres</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="statPuertasLibres">—</div>
+                        <div class="stat-label">Puertas libres</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="statEsperando">—</div>
+                        <div class="stat-label">En espera</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="statCompletados">—</div>
+                        <div class="stat-label">Completados</div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="card card-danger">
+                <h2 class="card-title">Demos Avanzadas</h2>
+                <p class="card-desc">
+                    Demuestra condiciones de carrera y exclusión mutua en tiempo real.
+                </p>
+                <button class="btn btn-danger" onclick="demostrarCarrera()">
+                    <span class="btn-icon">⚡</span> Condición de Carrera
+                </button>
+                <div class="demo-legend">
+                    <div class="legend-item">
+                        <span class="legend-dot red"></span>Sin exclusión mutua
+                    </div>
+                    <div class="legend-item">
+                        <span class="legend-dot green"></span>Con exclusión mutua
+                    </div>
+                </div>
+            </section>
+
+        </aside>
+
+        <!-- ── PANEL CENTRAL: Visualización del Aeropuerto ── -->
+        <section class="panel panel-main">
+
+            <!-- Pistas -->
+            <div class="section-header">
+                <h2 class="section-title">Pistas de Aterrizaje</h2>
+                <div class="section-badge">Semáforo Binario</div>
+            </div>
+            <div class="pistas-grid" id="pistasGrid">
+                <!-- Generado dinámicamente por JS -->
+            </div>
+
+            <!-- Puertas -->
+            <div class="section-header" style="margin-top:2rem">
+                <h2 class="section-title">Puertas de Embarque</h2>
+                <div class="section-badge accent">Semáforo de Conteo</div>
+            </div>
+            <div class="puertas-grid" id="puertasGrid">
+                <!-- Generado dinámicamente por JS -->
+            </div>
+
+            <!-- Aviones activos -->
+            <div class="section-header" style="margin-top:2rem">
+                <h2 class="section-title">Aviones Activos</h2>
+                <div class="section-badge info" id="badgeAviones">0 hilos</div>
+            </div>
+            <div class="aviones-list" id="avionesList">
+                <div class="empty-state">
+                    <div class="empty-icon">✈</div>
+                    <div class="empty-text">No hay aviones activos.<br>Inicia la simulación o agrega uno manualmente.
+                    </div>
+                </div>
+            </div>
+
+        </section>
+
+        <!-- ── PANEL DERECHO: Log de Eventos ── -->
+        <aside class="panel panel-log">
+            <div class="section-header">
+                <h2 class="section-title">Log de Eventos</h2>
+                <button class="btn-mini" onclick="limpiarLog()">Limpiar</button>
+            </div>
+            <div class="log-container" id="logContainer">
+                <div class="log-entry info">
+                    <span class="log-time">--:--:--.---</span>
+                    <span class="log-msg">Sistema listo. Inicia la simulación.</span>
+                </div>
+            </div>
+        </aside>
+
+    </main>
+
+    <!-- ══════════════════════ MODAL DE TEORÍA ══════════════════════ -->
+    <div class="theory-bar">
+        <div class="theory-inner">
+            <button class="theory-btn" onclick="toggleTeoria('semaforos')">📘 Semáforos</button>
+            <button class="theory-btn" onclick="toggleTeoria('deadlock')">🔒 Deadlocks</button>
+            <button class="theory-btn" onclick="toggleTeoria('carrera')">⚡ Cond. Carrera</button>
+            <button class="theory-btn" onclick="toggleTeoria('mutual')">🛡️ Exclusión Mutua</button>
+        </div>
+    </div>
+
+    <div class="teoria-modal" id="teoriaModal" style="display:none">
+        <div class="teoria-content">
+            <button class="teoria-close" onclick="cerrarTeoria()">✕</button>
+            <div id="teoriaBody"></div>
+        </div>
+    </div>
+
+    <script src="js/app.js"></script>
+    <script src="js/teoria.js"></script>
+</body>
+
+</html>

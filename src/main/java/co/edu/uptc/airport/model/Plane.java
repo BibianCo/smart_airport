@@ -1,5 +1,10 @@
 package co.edu.uptc.airport.model;
 
+import java.time.Instant;
+
+import lombok.Getter;
+import lombok.ToString;
+
 /**
  * Modelo que representa un avión en la simulación del aeropuerto.
  * Cada avión tiene un identificador único, un estado y referencias a los
@@ -8,6 +13,9 @@ package co.edu.uptc.airport.model;
  * @author Bibian Corredor
  * @author Valentina Vega
  */
+
+@Getter
+@ToString
 public class Plane {
     /** Identificador único del avión (ej: AV-001) */
     private final String idPlane;
@@ -26,22 +34,18 @@ public class Plane {
     private volatile int assignedDoor;
 
     /** Número de pista asignada (-1 si no tiene pista) */
-    private volatile int assignedTrack;
+    private volatile int assignedRunway;
 
-    /** Marca de tiempo de creación del avión */
-    private final long creationTime;
-
-    /** Marca de tiempo del último cambio de estado */
-    private volatile long lastStateChangeTime;
+    /** instante de creación del avión */
+    private final Instant creationPlane;
 
     public Plane(String idPlane, String namePlane) {
         this.idPlane = idPlane;
         this.namePlane = namePlane;
         this.statePlane = AirplaneState.WAITING_FYI; // Estado inicial
         this.assignedDoor = -1; // Sin puerta asignada inicialmente
-        this.assignedTrack = -1; // Sin pista asignada inicialmente
-        this.creationTime = System.currentTimeMillis();
-        this.lastStateChangeTime = this.creationTime;
+        this.assignedRunway = -1; // Sin pista asignada inicialmente
+        this.creationPlane = Instant.now();
     }
 
     public String getIdPlane() {
@@ -52,13 +56,16 @@ public class Plane {
         return namePlane;
     }
 
+    public Instant getCreationPlane() {
+        return creationPlane;
+    }
+
     public AirplaneState getStatePlane() {
         return statePlane;
     }
 
     public synchronized void setStatePlane(AirplaneState statePlane) {
         this.statePlane = statePlane;
-        this.lastStateChangeTime = System.currentTimeMillis();
     }
 
     public int getAssignedDoor() {
@@ -69,43 +76,12 @@ public class Plane {
         this.assignedDoor = assignedDoor;
     }
 
-    public int getAssignedTrack() {
-        return assignedTrack;
+    public int getAssignedRunway() {
+        return assignedRunway;
     }
 
     public synchronized void setAssignedRunway(int assignedTrack) {
-        this.assignedTrack = assignedTrack;
-    }
-
-    public long getCreationTime() {
-        return creationTime;
-    }
-
-    public long getLastStateChangeTime() {
-        return lastStateChangeTime;
-    }
-
-    public void setLastStateChangeTime(long lastStateChangeTime) {
-        this.lastStateChangeTime = lastStateChangeTime;
-    }
-
-    /**
-     * Retorna una representación en JSON del avión para enviarla al frontend.
-     *
-     * @return String JSON con los datos del avión
-     */
-
-    public String toJson() {
-        return String.format(
-                "{\"idPlane\":\"%s\",\"namePlane\":\"%s\",\"statePlane\":\"%s\",\"statePlaneDescription\":\"%s\",\"assignedDoor\":%d,\"assignedTrack\":%d,\"creationTime\":%d}",
-                idPlane, namePlane, statePlane.name(), statePlane.getDescription(), assignedDoor, assignedTrack,
-                creationTime);
-    }
-
-    @Override
-    public String toString() {
-        return "Plane [idPlane=" + idPlane + ", namePlane=" + namePlane + ", statePlane=" + statePlane
-                + ", assignedDoor=" + assignedDoor + ", assignedTrack=" + assignedTrack + "]";
+        this.assignedRunway = assignedTrack;
     }
 
 }

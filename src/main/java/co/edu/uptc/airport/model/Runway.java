@@ -1,6 +1,9 @@
 package co.edu.uptc.airport.model;
 
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.locks.ReentrantLock;
+
+import lombok.Getter;
 
 /**
  * Modelo que representa una pista de aterrizaje/despegue.
@@ -13,22 +16,25 @@ import java.util.concurrent.locks.ReentrantLock;
  * @author Valentina Vega
  * @version 1.0
  */
+
+@Getter
 public class Runway {
 
     /** Número identificador de la pista (base 1) */
     private final int runwayNumber;
 
     /**
-     * Lock que implementa el semáforo binario de la pista.
-     * ReentrantLock permite verificar si está ocupada y registrar quién la ocupa.
+     * Semáforo binario de la pista.
+     * {@code new Semaphore(1, true)} = semáforo binario con política FIFO.
+     * Implementa exclusión mutua: solo un avión a la vez.
      */
-    private final ReentrantLock lock;
+    private final Semaphore semaforo;
 
     /** Avión que actualmente ocupa la pista (null si libre) */
-    private volatile Plane occupiedPlane;
+    private volatile Plane planeActual;
 
     /** Contador de usos totales de esta pista */
-    private volatile int usageCount;
+    private volatile int useTotal;
 
     /**
      * Constructor de la pista.
@@ -38,9 +44,9 @@ public class Runway {
     public Runway(int runwayNumber) {
         this.runwayNumber = runwayNumber;
         // fair=true garantiza orden FIFO para evitar inanición
-        this.lock = new ReentrantLock(true);
-        this.occupiedPlane = null;
-        this.usageCount = 0;
+        this.semaforo = new Semaphore(1, true);
+        this.planeActual = null;
+        this.useTotal = 0;
     }
 
     /**
@@ -50,8 +56,8 @@ public class Runway {
      * @param plane El avión que ocupa la pista
      */
     public synchronized void assignPlane(Plane plane) {
-        this.occupiedPlane = plane;
-        this.usageCount++;
+        this.planeActual = plane;
+        this.useTotal++;
     }
 
     /**
@@ -63,9 +69,9 @@ public class Runway {
      * @throws InterruptedException si el hilo es interrumpido mientras espera
      */
     public void acquire(Plane plane) throws InterruptedException {
-        lock.lockInterruptibly(); // Bloquea hasta que la pista esté libre o el hilo sea interrumpido
-        occupiedPlane = plane; // Registra el avión que ocupa la pista
-        usageCount++; // Incrementa el contador de usos
+        semaforo.acquire(); // P(semaforo) — bloquea si valor = 0
+        planeActual = plane; // Registra el avión que ocupa la pista
+        useTotal++; // Incrementa el contador de usos
     }
 
     /**
@@ -73,10 +79,8 @@ public class Runway {
      * Solo puede liberar quien la adquirió.
      */
     public void release() {
-        occupiedPlane = null; // Marca la pista como libre
-        if (lock.isHeldByCurrentThread()) {
-            lock.unlock(); // Desbloquea para que otros aviones puedan adquirirla
-        }
+        this.planeActual = null;
+        semaforo.release(); // V(semaforo) — despierta siguiente hilo
     }
 
     /**
@@ -85,45 +89,19 @@ public class Runway {
      * @return true si la pista está libre
      */
     public boolean isAvailable() {
-        return !lock.isLocked();
+        return planeActual == null;
     }
 
     public int getRunwayNumber() {
         return runwayNumber;
     }
 
-    public ReentrantLock getLock() {
-        return lock;
+    public Plane getPlaneActual() {
+        return planeActual;
     }
 
-    public Plane getOccupiedPlane() {
-        return occupiedPlane;
-    }
-
-    public int getUsageCount() {
-        return usageCount;
-    }
-
-    /**
-     * Retorna representación JSON de la pista.
-     *
-     * @return String JSON
-     */
-    public String toJson() {
-        String palneJson = occupiedPlane != null
-                ? String.format("{\"id\":\"%s\",\"name\":\"%s\"}", occupiedPlane.getIdPlane(),
-                        occupiedPlane.getNamePlane())
-                : "null";
-        return String.format(
-                "{\"runwayNumber\":%d,\"isAvailable\":%b,\"occupiedPlane\":%s,\"usageCount\":%d}",
-                runwayNumber, isAvailable(), palneJson, usageCount);
-    }
-
-    @Override
-    public String toString() {
-        return String.format("Runway{runwayNumber=%d, isAvailable=%b, occupiedPlane=%s}",
-                runwayNumber, isAvailable(), occupiedPlane != null ? occupiedPlane.getIdPlane() : "none",
-                usageCount);
+    public int getUseTotal() {
+        return useTotal;
     }
 
 }

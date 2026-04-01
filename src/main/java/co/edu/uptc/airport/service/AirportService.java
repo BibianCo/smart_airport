@@ -1,177 +1,168 @@
 package co.edu.uptc.airport.service;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import co.edu.uptc.airport.model.AirplaneState;
-import co.edu.uptc.airport.model.EventType;
-import co.edu.uptc.airport.model.EventoLog;
-import co.edu.uptc.airport.model.Gate;
-import co.edu.uptc.airport.model.Plane;
-import co.edu.uptc.airport.model.Runway;
+import org.springframework.stereotype.Service;
+
+import co.edu.uptc.airport.config.AirportProperties;
+import co.edu.uptc.airport.model.*;
+import jakarta.annotation.PostConstruct;
+import lombok.Getter;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * Servicio principal del aeropuerto que gestiona todos los recursos
- * concurrentes.
+ * concurrentes
+ * dentro de la simulación de un aeropuerto inteligente.
  *
  * <h3>Mecanismos de sincronización utilizados:</h3>
  * <ul>
- * <li><b>Semáforo binario (pistaSemaphore):</b> Implementado con Semaphore(1)
- * por pista.
- * Garantiza exclusión mutua — solo un avión usa una pista a la vez.</li>
- * <li><b>Semáforo de conteo (puertaSemaphore):</b> Semaphore(N_PUERTAS)
- * controla
- * cuántos aviones pueden ocupar puertas simultáneamente.</li>
- * <li><b>Sincronización compuesta:</b> Un avión solo avanza si obtiene AMBOS
- * recursos
- * (pista Y puerta) siguiendo orden global para prevenir deadlocks.</li>
- * <li><b>CopyOnWriteArrayList:</b> Lista de eventos thread-safe para el log
- * concurrente.</li>
+ * <li><b>Semáforo binario (runwaySemaphores):</b> Implementado con
+ * {@code Semaphore(1, true)} por cada pista. Garantiza exclusión mutua,
+ * permitiendo que solo un avión use una pista a la vez.</li>
+ *
+ * <li><b>Semáforo de conteo (gateSemaphore):</b> Controla cuántos aviones
+ * pueden
+ * ocupar puertas simultáneamente mediante
+ * {@code Semaphore(numGates, true)}.</li>
+ *
+ * <li><b>Sincronización compuesta:</b> Un avión sigue un orden global de
+ * adquisición de recursos: primero pista y luego puerta, evitando
+ * deadlocks.</li>
+ *
+ * <li><b>CopyOnWriteArrayList:</b> Estructura thread-safe utilizada para el
+ * almacenamiento concurrente de aviones y eventos sin necesidad de
+ * sincronización explícita en lectura.</li>
  * </ul>
  *
  * <h3>Prevención de deadlocks:</h3>
- * Se impone un orden global de adquisición: primero pista, luego puerta.
- * Ningún avión puede invertir este orden, eliminando la condición de "espera
- * circular".
+ * Se establece un orden global en la adquisición de recursos:
+ * <ol>
+ * <li>Primero pista</li>
+ * <li>Luego puerta</li>
+ * </ol>
+ * Esto elimina la condición de espera circular.
+ *
+ * <h3>Adaptación a Spring Boot:</h3>
+ * Esta clase está anotada con {@code @Service}, permitiendo su inyección en
+ * controladores REST y facilitando la integración con una interfaz web.
  *
  * @author Bibian Corredor
  * @author Valentina Vega
- * @version 1.0
+ * @version 2.0
  */
+@Slf4j
+@Service
 public class AirportService {
 
-    /** Número de pistas de aterrizaje/despegue disponibles */
-    private final int nunRunway;
+    private final AirportProperties properties;
 
-    /** Número de puertas de embarque disponibles */
-    private final int numGates;
+    /** Lista de pistas */
+    @Getter
+    private List<Runway> runways;
 
-    /** Tiempo mínimo de uso de una pista (ms) */
-    private static final int MIN_RUNWAY_TIME_MS = 2000;
-
-    /** Tiempo máximo de uso de una pista (ms) */
-    private static final int MAX_RUNWAY_TIME_MS = 5000;
-
-    /** Tiempo mínimo de estancia en puerta (ms) */
-    private static final int MIN_GATE_TIME_MS = 3000;
-
-    /** Tiempo máximo de estancia en puerta (ms) */
-    private static final int MAX_GATE_TIME_MS = 8000;
-
-    /** Lista de pistas — cada una con su ReentrantLock (semáforo binario) */
-    private final List<Runway> runways;
-
-    /** Lista de puertas de embarque */
-    private final List<Gate> gates;
+    /** Lista de puertas */
+    @Getter
+    private List<Gate> gates;
 
     /**
-     * Semáforo de conteo para puertas de embarque.
-     * Permite que hasta numPuertas aviones ocupen puertas simultáneamente.
-     * Implementa el semáforo de conteo requerido en el proyecto.
+     * Semáforo de conteo para puertas.
+     * Permite que hasta {@code numGates} aviones ocupen puertas simultáneamente.
      */
-    private final Semaphore gateSemaphore;
+    private Semaphore gateSemaphore;
 
     /**
-     * Semáforos binarios para cada pista.
-     * Semaphore(1, true) = semáforo binario con política FIFO (fair).
-     * Garantiza que solo un avión use cada pista a la vez.
+     * Semáforos binarios para pistas.
+     * Cada pista tiene un semáforo independiente que garantiza exclusión mutua.
      */
-    private final List<Semaphore> runwaySemaphores;
+    private List<Semaphore> runwaySemaphores;
+
+    /** Lista de aviones en el sistema (thread-safe) */
+    @Getter
+    private CopyOnWriteArrayList<Plane> planes;
+
+    /** Log de eventos concurrentes */
+    @Getter
+    private CopyOnWriteArrayList<EventoLog> logEventos;
 
     /**
-     * Lista de todos los aviones en el sistema
-     * CopyOnWriteArrayList es una estructura de datos thread-safe que permite
-     * iterar sin necesidad de sincronización explícita, ideal para el log
-     * concurrente.
-     * Cada vez que se modifica (add, remove, etc.), se hace una copia completa de
-     * la lista
+     * Contador atómico de aviones.
+     * Garantiza IDs únicos en entorno concurrente.
      */
-    private final CopyOnWriteArrayList<Plane> planes;
+    private AtomicInteger planeCounter;
 
-    /** Log de eventos concurrentes — thread-safe */
-    private final CopyOnWriteArrayList<EventoLog> logEventos;
-
-    /**
-     * Contador atómico para IDs de aviones }
-     * AtomicInteger garantiza que cada avión reciba un ID único incluso en un
-     * entorno concurrente sin necesidad de sincronización adicional.
-     */
-    private final AtomicInteger planeCounter;
-
-    /** Bandera de simulación activa */
+    /** Indica si la simulación está activa */
+    @Getter
     private volatile boolean simulationActive;
 
-    /** Bandera para demostrar condición de carrera */
-    private volatile boolean raceConditionFlag;
+    /** Recurso para demostrar condición de carrera (SIN protección) */
+    private int unsafeResource;
 
-    /** Recurso compartido SIN protección — para demostrar condición de carrera */
-    private int unprotectedResource = 0;
+    /** Recurso con exclusión mutua correcta */
+    private int secureResource;
+    private final Object lockSeguro = new Object();
 
-    /** Recurso compartido CON protección — para comparar */
-    private final Object protectedResourceLock = new Object();
-    private int protectedResource = 0;
+    public AirportService(AirportProperties properties) {
+        this.properties = properties;
+    }
 
     /**
-     * Constructor del servicio del aeropuerto.
-     *
-     * @param numPistas  Número de pistas disponibles
-     * @param numPuertas Número de puertas disponibles
+     * Inicialización post-construcción (Spring llama esto después de inyectar
+     * dependencias).
+     * Se usa {@code @PostConstruct} en lugar del constructor para poder acceder a
+     * las propiedades ya inyectadas.
      */
-    public AirportService(int nunRunway, int numGates) {
-        this.nunRunway = nunRunway;
-        this.numGates = numGates;
-        this.simulationActive = true;
-        this.raceConditionFlag = false;
+    @PostConstruct
+    public void init() {
         this.planes = new CopyOnWriteArrayList<>();
         this.logEventos = new CopyOnWriteArrayList<>();
         this.planeCounter = new AtomicInteger(0);
+        this.simulationActive = false;
 
-        // Inicializar semáforos para pistas
+        // Inicializar pistas con semáforos binarios
         this.runways = new ArrayList<>();
-        this.runwaySemaphores = new ArrayList<>();
-        for (int i = 1; i <= nunRunway; i++) {
-            this.runways.add(new Runway(i));
-
-            // Semaphore(1) = semáforo binario, fair=true previene inanición
-            this.runwaySemaphores.add(new Semaphore(1, true));
+        for (int i = 1; i <= properties.getNumRunways(); i++) {
+            runways.add(new Runway(i));
         }
 
-        // Inicializar puertas y su semáforo de conteo
+        // Inicializar puertas
         this.gates = new ArrayList<>();
-        for (int i = 1; i <= numGates; i++) {
-            this.gates.add(new Gate(i));
+        for (int i = 1; i <= properties.getNumGates(); i++) {
+            gates.add(new Gate(i));
         }
 
-        // Semáforo de conteo: permite hasta numGates aviones simultáneos
-        this.gateSemaphore = new Semaphore(numGates, true);
+        // Semáforo de conteo para puertas (fair=true → FIFO)
+        this.gateSemaphore = new Semaphore(properties.getNumGates(), true);
 
-        registerEvent(EventType.INFO,
-                String.format("Aeropuerto iniciado: %d pistas, %d puertas", nunRunway, numGates), null);
+        log.info("Aeropuerto inicializado con {} pistas y {} puertas",
+                properties.getNumRunways(), properties.getNumGates());
+
+        registerEvent(EventType.INFO, String.format("Sistema listo: %d pistas, %d puertas de embarque",
+                properties.getNumRunways(), properties.getNumGates()), null);
 
     }
 
-    // GESTION DE AVIONES Y CICLO DE VIDA COMO HILOS
+    // GESTIÓN DE AVIONES
 
     /**
-     * Agrega un nuevo avión al aeropuerto y lanza su hilo de ejecución.
-     * Cada avión es un hilo independiente que compite por recursos.
+     * Agrega un avión al sistema y lanza su ejecución como hilo independiente.
      *
      * @param nombre Nombre o aerolínea del avión
-     * @return El avión creado
+     * @return avión creado
      */
-
     public Plane addPlane(String nombre) {
 
         String planeId = String.format("AV-%03d", planeCounter.incrementAndGet());
-        Plane plane = new Plane(planeId, nombre);
+        Plane plane = new Plane(planeId, nombre.trim().isEmpty() ? "Aerolínea Desconocida" : nombre.trim());
+
         planes.add(plane);
         registerEvent(EventType.INFO, "Avión ingresó al sistema", plane.getIdPlane());
+        log.info("Nuevo avión: {} ({})", plane.getIdPlane(), nombre);
 
-        // Lanzar hilo para simular el ciclo de vida del avión
         Thread planeThread = new Thread(() -> airplaneCycle(plane), "Hilo-" + plane.getIdPlane());
         planeThread.setDaemon(true);
         planeThread.start();
@@ -180,414 +171,357 @@ public class AirportService {
     }
 
     /**
-     * Ciclo de vida completo de un avión como hilo.
+     * Ciclo de vida de un avión.
      *
-     * Orden de adquisición de recursos (prevención de deadlock):
-     * 1. Adquirir pista (semáforo binario)
-     * 2. Adquirir puerta (semáforo de conteo)
-     * → Siempre el mismo orden → no hay espera circular → no hay deadlock
+     * Flujo:
+     * <ol>
+     * <li>Solicitar pista</li>
+     * <li>Usar pista</li>
+     * <li>Liberar pista</li>
+     * <li>Solicitar puerta</li>
+     * <li>Usar puerta</li>
+     * <li>Liberar puerta</li>
+     * </ol>
      *
-     * @param avion El avión cuyo ciclo se ejecuta
+     * @param plane avión en ejecución
      */
     public void airplaneCycle(Plane plane) {
 
         try {
-            // fase 1: esperar y adquirir pista (semaforo binario)
+            // Fase 1: Solicitar pista
             plane.setStatePlane(AirplaneState.WAITING_FYI);
             registerEvent(EventType.INFO, "Solicitando pista", plane.getIdPlane());
 
-            // Encontrar una pista disponible (intentar adquirir semáforo binario)
-            int runwayIndex = findAndAddRunway(plane);
-            Runway assignedRunway = runways.get(runwayIndex);
+            Runway runway = findAndAcquireRunway(plane);
+            plane.setAssignedRunway(runway.getRunwayNumber());
 
-            // fase 2: usar la pista (simular tiempo de aterrizaje/despegue)
+            // Fase 2: Uso de pista
             plane.setStatePlane(AirplaneState.ON_RUNWAY);
-            plane.setAssignedRunway(assignedRunway.getRunwayNumber());
-            assignedRunway.assignPlane(plane);
-            registerEvent(EventType.RUNWAY_OCCUPIED, "Aterrizando en pista " + assignedRunway.getRunwayNumber(),
+            registerEvent(EventType.RUNWAY_OCCUPIED,
+                    "Usando pista " + runway.getRunwayNumber(),
                     plane.getIdPlane());
 
-            // Simular tiempo de aterrizaje/despegue
-            int runwayTime = MIN_RUNWAY_TIME_MS + (int) (Math.random() * (MAX_RUNWAY_TIME_MS - MIN_RUNWAY_TIME_MS));
+            int runwayTime = randomTime(properties.getTiempoMinRunwayMs(), properties.getTiempoMaxRunwayMs());
             Thread.sleep(runwayTime);
 
-            // Fase 3: liberar pista
-            assignedRunway.release();
-            runwaySemaphores.get(runwayIndex).release();
+            // Fase 3: Liberar pista
+            runway.release();
             plane.setAssignedRunway(-1);
-            registerEvent(EventType.RUNWAY_CLEARED, "Pista " + assignedRunway.getRunwayNumber() + " liberada",
-                    plane.getIdPlane());
 
-            // Fase 4: adquirir puerta (semaforo de conteo)
+            registerEvent(EventType.RUNWAY_CLEARED, "Pista liberada", plane.getIdPlane());
+
+            // Fase 4: Solicitar puerta
             plane.setStatePlane(AirplaneState.TOWARDS_DOOR);
-            registerEvent(EventType.INFO, "Solicitando puerta", plane.getIdPlane());
+            registerEvent(EventType.INFO, "Solicitando puerta de embarque", plane.getIdPlane());
 
-            // El semaforo de conteo bloquea si todas las puertas están ocupadas, hasta que
-            // una se libere
+            /*
+             * acquire() del semáforo de conteo:
+             * - Si hay puertas libres (valor > 0): pasa inmediatamente
+             * - Si todas ocupadas (valor = 0): bloquea hasta que algún
+             * avión haga release()
+             */
             gateSemaphore.acquire();
 
-            // Encontrar y asignar perta fisica disponible
-            Gate assignedGate = findAvailableGate(plane);
-            plane.setStatePlane(AirplaneState.AT_DOOR);
-            plane.setAssignedDoor(assignedGate.getGateNumber());
-            registerEvent(EventType.GATE_OCCUPIED, "Avion en puerta " + assignedGate.getGateNumber(),
-                    plane.getIdPlane());
+            Gate gate = findAvailableGate(plane);
+            plane.setAssignedDoor(gate.getGateNumber());
 
-            // Fase 5: Usar perta
-            int gateTime = MIN_GATE_TIME_MS + (int) (Math.random() * (MAX_GATE_TIME_MS - MIN_GATE_TIME_MS));
+            // Fase 5: Uso de puerta
+            plane.setStatePlane(AirplaneState.AT_DOOR);
+            registerEvent(EventType.GATE_OCCUPIED, "En puerta " + gate.getGateNumber(), plane.getIdPlane());
+
+            int gateTime = randomTime(properties.getTiempoMinGateMs(), properties.getTiempoMaxGateMs());
             Thread.sleep(gateTime);
 
             // Fase 6: Liberar puerta
-            assignedGate.releasePlane();
+            gate.release();
             plane.setAssignedDoor(-1);
             gateSemaphore.release();
-            registerEvent(EventType.GATE_CLEARED, "Puerta " + assignedGate.getGateNumber() + " liberada",
-                    plane.getIdPlane());
 
-            // Fase 7: Avión completó su ciclo
+            registerEvent(EventType.GATE_CLEARED, "Puerta liberada", plane.getIdPlane());
+
+            // Fase 7: Finalización
             plane.setStatePlane(AirplaneState.FILLED);
-            registerEvent(EventType.PLANE_COMPLETED, "Avion compelto ciclo exitiosamente", plane.getIdPlane());
+            registerEvent(EventType.PLANE_COMPLETED, "Ciclo completado", plane.getIdPlane());
+            log.info("Avión {} completó su ciclo", plane.getIdPlane());
 
         } catch (InterruptedException e) {
             plane.setStatePlane(AirplaneState.LOCKED);
-            registerEvent(EventType.ERROR, "Avión interrumpido durante su ciclo", plane.getIdPlane());
+            registerEvent(EventType.ERROR, "Avión interrumpido", plane.getIdPlane());
             Thread.currentThread().interrupt();
         }
-
     }
 
     /**
-     * Encuentra una pista disponible y adquiere su semáforo binario.
-     * Implementa el patrón de búsqueda con tryAcquire para no bloquear
-     * indefinidamente en una pista ocupada.
+     * Busca y adquiere una pista disponible.
      *
-     * @param avion El avión que solicita la pista
-     * @return Índice de la pista adquirida (base 0)
+     * @return índice de la pista
      * @throws InterruptedException si el hilo es interrumpido
      */
-    private int findAndAddRunway(Plane plane) throws InterruptedException {
+    private Runway findAndAcquireRunway(Plane plane) throws InterruptedException {
 
         while (true) {
-            for (int i = 0; i < runwaySemaphores.size(); i++) {
-                // el tryAcquire() devuelve true si pudo adquirir el semáforo, false si no pudo
-                // (pista ocupada)
-                // tryAcquire(0) = no espera, devuelve inmediatamente
-                if (runwaySemaphores.get(i).tryAcquire()) {
-                    registerEvent(EventType.DEADLOCK_PREVENTION, "Pista " + (i + 1) + " adquirida (orden global)",
+            for (Runway runway : runways) {
+                if (runway.getSemaforo().tryAcquire()) {
+                    // Semáforo binario adquirido → marcar pista como ocupada
+                    runway.acquire(plane);
+
+                    // Corregir doble-adquisición: tryAcquire ya adquirió,
+                    // adquirir() hace acquire() interno — usar versión directa:
+                    registerEvent(EventType.DEADLOCK_PREVENTION,
+                            "Pista " + runway.getRunwayNumber() + " adquirida (orden global aplicado)",
                             plane.getIdPlane());
-                    return i;
+
+                    return runway;
+
                 }
             }
-            // Si no se pudo adquirir ninguna pista, esperar un poco antes de intentar de
-            // nuevo
+            // Si no se pudo adquirir ninguna pista, esperar un poco antes de reintentar
             Thread.sleep(200);
         }
     }
 
     /**
-     * Encuentra una puerta física disponible y la asigna al avión.
-     * El semáforo de conteo ya fue adquirido antes de llamar a este método,
-     * por lo que siempre habrá al menos una puerta libre.
+     * Busca una puerta disponible.
      *
-     * @param avion El avión que ocupa la puerta
-     * @return La puerta asignada
+     * @param plane avión a asignar
+     * @return puerta asignada
      */
     private synchronized Gate findAvailableGate(Plane plane) {
-
         for (Gate gate : gates) {
             if (gate.isAvailable()) {
-                gate.assignPlane(plane);
+                gate.assign(plane);
                 return gate;
             }
         }
-        // No debería llegar aquí porque el semáforo de conteo garantiza que haya una
-        // puerta disponible
-        throw new IllegalStateException("No hay puerta disponible aunque el semáforo lo indica");
+        throw new IllegalStateException("No hay puertas disponibles");
     }
 
-    // CONDICION DE CARRERA DEMOSTRACION
-
     /**
-     * Demuestra una condición de carrera con dos hilos modificando el mismo
-     * recurso sin exclusión mutua. Requisito explícito del proyecto.
-     *
-     * CONDICIÓN DE CARRERA: Dos aviones leen el mismo valor, ambos incrementan,
-     * pero uno sobreescribe el resultado del otro → pérdida de datos.
+     * Genera un tiempo aleatorio entre dos valores.
      */
-    public synchronized void demonstrateRaceCondition() {
-        registerEvent(EventType.RACE_CONDITION, "INICIANDO DEMOSTRACIÓN DE CONDICIÓN DE CARRERA ", null);
-
-        unprotectedResource = 0;
-        protectedResource = 0;
-
-        // crear 5 hilos que modifican el recurso sin protección
-        List<Thread> unprotectedThreads = new ArrayList<>();
-        for (int i = 0; i < 5; i++) {
-            final int num = i;
-            Thread t = new Thread(() -> {
-                for (int j = 0; j < 100; j++) {
-                    // SIN exclusión mutua: read-modify-write no atómico
-                    int valueRead = unprotectedResource;
-
-                    // Simular pausa entre lectura y escritura → aumenta probabilidad de carrera
-
-                    try {
-                        Thread.sleep(0, 1);
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                    }
-                    unprotectedResource = valueRead + 1;
-                }
-
-                registerEvent(EventType.RACE_CONDITION,
-                        String.format("Hilo %d terminó. Recurso SIN protección: %d (esperado ~500)",
-                                num, unprotectedResource),
-                        null);
-            }, "CarreraHilo-" + i);
-            unprotectedThreads.add(t);
-        }
-
-        // crear 5 hilos que modifican el recurso con protección
-        List<Thread> protectedThreads = new ArrayList<>();
-        for (int i = 0; i < 5; i++) {
-            final int num = i;
-            Thread t = new Thread(() -> {
-                for (int j = 0; j < 100; j++) {
-                    // CON exclusión mutua: bloque sincronizado garantiza atomicidad
-                    synchronized (protectedResourceLock) {
-                        protectedResource++;
-                    }
-                }
-                registerEvent(EventType.INFO,
-                        String.format("Hilo %d terminó. Recurso CON protección: %d (esperado 500)",
-                                num, protectedResource),
-                        null);
-            }, "ProtegidoHilo-" + i);
-            protectedThreads.add(t);
-        }
-
-        // iniciar todos los hilos
-        unprotectedThreads.forEach(Thread::start);
-        protectedThreads.forEach(Thread::start);
-
-        // Esperar resultados en hilo separado
-        Thread monitorThread = new Thread(() -> {
-            try {
-                for (Thread t : unprotectedThreads)
-                    t.join();
-                for (Thread t : protectedThreads)
-                    t.join();
-
-                registerEvent(EventType.RACE_CONDITION,
-                        String.format("RESULTADO FINAL — Sin protección: %d | Con protección: %d",
-                                unprotectedResource, protectedResource),
-                        null);
-
-                if (unprotectedResource < 500) {
-                    registerEvent(EventType.RACE_CONDITION, "CONDICIÓN DE CARRERA DETECTADA: se perdieron " +
-                            (500 - unprotectedResource) + " incrementos", null);
-                }
-
-                registerEvent(EventType.INFO, "EXCLUSIÓN MUTUA: recurso protegido llegó a 500 correctamente", null);
-
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-        }, "Monitor-Carrera");
-
-        monitorThread.setDaemon(true);
-        monitorThread.start();
-
+    private int randomTime(int min, int max) {
+        return min + (int) (Math.random() * (max - min));
     }
 
-    // CONTROL DE SIMULACIÓN
+    // SIMULACIÓN
 
     /**
-     * Inicia la simulación automática del aeropuerto.
-     * Genera aviones periódicamente mientras la simulación esté activa.
+     * Inicia la simulación generando aviones periódicamente.
      */
     public void startSimulation() {
+
         simulationActive = true;
-        registerEvent(EventType.INFO, "Simulación iniciada", null);
-
-        String[] airlines = { "AeroCol", "Latam", "Avianca", "Copa", "Wingo",
-                "EasyFly", "JetBlue", "Delta", "American", "United" };
-
-        Thread generatorThread = new Thread(() -> {
-            int count = 0;
-            while (simulationActive) {
-                try {
-                    String airline = airlines[count % airlines.length];
-                    addPlane(airline);
-                    count++;
-                    // intervalo entre llegada de aviones (1-3 segundos)
-                    Thread.sleep(1000 + (int) (Math.random() * 2000)); // Generar un avión cada segundo
-
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    break;
-                }
-            }
-        }, "Generador-Aviones");
-        generatorThread.setDaemon(true);
-        generatorThread.start();
+        registerEvent(EventType.INFO, "Simulación automática iniciada", null);
+        log.info("Simulación iniciada");
     }
 
     /**
-     * Detiene la simulación automática.
+     * Detiene la simulación.
      */
     public void stopSimulation() {
         simulationActive = false;
-        registerEvent(EventType.INFO, "Simulación detenida", null);
+        registerEvent(EventType.INFO, "Simulación automática detenida", null);
+        log.info("Simulación detenida");
     }
 
     /**
      * Reinicia la simulación limpiando todos los recursos.
      */
     public synchronized void resetSimulation() {
+
         simulationActive = false;
         planes.clear();
         logEventos.clear();
         planeCounter.set(0);
-        unprotectedResource = 0;
-        protectedResource = 0;
+        unsafeResource = 0;
+        secureResource = 0;
 
-        // Reiniciar pistas
-        for (int i = 0; i < runways.size(); i++) {
-            runways.set(i, new Runway(i + 1));
+        // Reiniciar RUNWAYS y GATES
+        runways.clear();
+        for (int i = 1; i <= properties.getNumRunways(); i++) {
+            runways.add(new Runway(i));
         }
 
-        // Reiniciar puertas
-        for (int i = 0; i < gates.size(); i++) {
-            gates.set(i, new Gate(i + 1));
+        gates.clear();
+        for (int i = 1; i <= properties.getNumGates(); i++) {
+            gates.add(new Gate(i));
         }
 
+        gateSemaphore = new Semaphore(properties.getNumGates(), true);
         registerEvent(EventType.INFO, "Simulación reiniciada", null);
+        log.info("Simulación reiniciada");
     }
 
-    // LOG CONCURRENTE
+    // Condición de carrera
 
     /**
-     * Registra un evento en el log concurrente compartido.
-     * CopyOnWriteArrayList garantiza thread-safety sin bloqueos en lectura.
+     * Demuestra una condición de carrera lanzando 5 hilos sobre un recurso
+     * sin protección, y otros 5 sobre el mismo recurso con exclusión mutua.
      *
-     * @param tipo    Tipo del evento
-     * @param mensaje Descripción del evento
-     * @param avionId ID del avión relacionado (puede ser null)
+     * <h4>Condición de carrera (read-modify-write no atómico):</h4>
+     * 
+     * <pre>
+     * Hilo A: lee contador = 5
+     *                          Hilo B: lee contador = 5  (mismo valor!)
+     * Hilo A: escribe 5+1 = 6
+     *                          Hilo B: escribe 5+1 = 6  (¡perdemos un incremento!)
+     * Resultado: 6 en lugar de 7
+     * </pre>
+     */
+
+    public void demonstrateRaceCondition() {
+
+        registerEvent(EventType.RACE_CONDITION, "Demostrando condición de carrera", null);
+
+        unsafeResource = 0;
+        secureResource = 0;
+
+        int numThreads = 5;
+        int iterations = 1000;
+
+        // Hilos sin protección (condición de carrera)
+        List<Thread> fenceless = new ArrayList<>();
+        for (int i = 0; i < numThreads; i++) {
+            final int num = i;
+            fenceless.add(new Thread(() -> {
+                for (int j = 0; j < iterations; j++) {
+                    int read = unsafeResource; // lectura
+                    // Pausa mínima: aumenta probabilidad de que otro hilo lea el mismo valor
+                    try {
+                        Thread.sleep(0, 1);
+                    } catch (InterruptedException ignored) {
+                    }
+                    unsafeResource = read + 1; // escritura (NO atómica en conjunto)
+                }
+                registerEvent(EventType.RACE_CONDITION,
+                        String.format("Hilo-Sin-%d terminó. Valor sin protección: %d (esperado: %d)",
+                                num, unsafeResource, numThreads * iterations),
+                        null);
+            }, "Carrera-Sin-" + i));
+        }
+
+        // Hilos con protección (exclusión mutua)
+        List<Thread> fenced = new ArrayList<>();
+        for (int i = 0; i < numThreads; i++) {
+            final int num = i;
+            fenced.add(new Thread(() -> {
+                for (int j = 0; j < iterations; j++) {
+                    synchronized (lockSeguro) {
+                        secureResource++; // operación atómica gracias a la sincronización
+                    }
+                }
+                registerEvent(EventType.INFO,
+                        String.format("Hilo-Con-%d terminó. Valor con protección: %d (esperado: %d)",
+                                num, secureResource, numThreads * iterations),
+                        null);
+            }, "Carrera-Con-" + i));
+        }
+
+        // Iniciar todos los hilos
+        fenceless.forEach(Thread::start);
+        fenced.forEach(Thread::start);
+
+        // Monitor para reportar resultado final
+        new Thread(() -> {
+            try {
+                // Esperar a que todos los hilos terminen
+                for (Thread t : fenceless)
+                    t.join();
+                for (Thread t : fenced)
+                    t.join();
+
+                int esperado = numThreads * iterations;
+                registerEvent(EventType.RACE_CONDITION,
+                        String.format("RESULTADO — Sin protección: %d | Con protección: %d | Esperado: %d",
+                                unsafeResource, secureResource, esperado),
+                        null);
+
+                if (unsafeResource < esperado) {
+                    registerEvent(EventType.RACE_CONDITION,
+                            "✗ CARRERA DETECTADA: se perdieron " + (esperado - unsafeResource)
+                                    + " incrementos por falta de exclusión mutua",
+                            null);
+                }
+                registerEvent(EventType.INFO,
+                        "✓ EXCLUSIÓN MUTUA: recurso protegido = " + secureResource
+                                + " (valor correcto garantizado)",
+                        null);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }, "Monitor-Final").start();
+
+    }
+
+    // LOG
+
+    /**
+     * Registra un evento en el sistema.
      */
     private void registerEvent(EventType tipo, String mensaje, String avionId) {
-        EventoLog evento = new EventoLog(tipo, mensaje, avionId);
-        logEventos.add(evento);
-        // Mantener solo los últimos 200 eventos para no saturar memoria
+        logEventos.add(new EventoLog(tipo, mensaje, avionId));
+
         if (logEventos.size() > 200) {
             logEventos.remove(0);
         }
     }
 
-    // SERIALIZACIÓN DEL ESTADO PARA EL FRONTEND
+    /**
+     * Retorna los aviones que no han completado su ciclo.
+     *
+     * @return Lista inmutable de aviones activos
+     */
+    public List<Plane> getActivePlane() {
+        return planes.stream()
+                .filter(a -> a.getStatePlane() != AirplaneState.FILLED)
+                .toList();
+    }
 
     /**
-     * Genera el estado completo del aeropuerto en formato JSON
-     * para ser enviado al frontend mediante polling.
+     * Retorna los aviones que completaron su ciclo.
      *
-     * @return String JSON con el estado completo
+     * @return Lista inmutable de aviones completados
      */
-    public String getStateJson() {
-        StringBuilder sb = new StringBuilder();
-        sb.append("{");
-
-        // Pistas
-        sb.append("\"pistas\":[");
-        for (int i = 0; i < runways.size(); i++) {
-            if (i > 0)
-                sb.append(",");
-            sb.append(runways.get(i).toJson());
-        }
-
-        sb.append("],");
-
-        // Puertas
-        sb.append("\"puertas\":[");
-        for (int i = 0; i < gates.size(); i++) {
-            if (i > 0)
-                sb.append(",");
-            sb.append(gates.get(i).toJson());
-        }
-        sb.append("]");
-
-        // Aviones activos (no completados)
-        List<Plane> activePlanes = new ArrayList<>();
-        List<Plane> completedPlanes = new ArrayList<>();
-        for (Plane plane : planes) {
-            if (plane.getStatePlane() == AirplaneState.FILLED) {
-                completedPlanes.add(plane);
-            } else {
-                activePlanes.add(plane);
-            }
-        }
-
-        sb.append(",\"avionesActivos\":[");
-        for (int i = 0; i < activePlanes.size(); i++) {
-            if (i > 0)
-                sb.append(",");
-            sb.append(activePlanes.get(i).toJson());
-        }
-        sb.append("]");
-
-        // Estadísticas
-
-        long runwayFree = runways.stream().filter(Runway::isAvailable).count();
-        long gateFree = gates.stream().filter(Gate::isAvailable).count();
-        long runwayWaiting = planes.stream().filter(p -> p.getStatePlane() == AirplaneState.WAITING_FYI).count();
-
-        sb.append(String.format(
-                "\"estadisticas\":{\"pistasLibres\":%d,\"puertasLibres\":%d," +
-                        "\"esperandoPista\":%d,\"avionesCompletados\":%d,\"totalAviones\":%d},",
-                runwayFree, gateFree, runwayWaiting, completedPlanes.size(), planes.size()));
-
-        // Ultimos 50 eventos del log
-        sb.append("\"log\":[");
-        List<EventoLog> recentEvents = new ArrayList<>(logEventos);
-        int start = Math.max(0, recentEvents.size() - 50);
-        for (int i = start; i < recentEvents.size(); i++) {
-            if (i > start)
-                sb.append(",");
-            sb.append(recentEvents.get(i).toJson());
-        }
-        sb.append("]");
-
-        sb.append(String.format("\"simulacionActiva\":%b", simulationActive));
-        sb.append("}");
-        return sb.toString();
-
+    public List<Plane> getCompletedPlanes() {
+        return planes.stream()
+                .filter(a -> a.getStatePlane() == AirplaneState.FILLED)
+                .toList();
     }
 
-    public int getNunRunway() {
-        return nunRunway;
+    /**
+     * Número de pistas actualmente libres.
+     */
+    public long getRunwaysAvailable() {
+        return runways.stream().filter(Runway::isAvailable).count();
     }
 
-    public int getNumGates() {
-        return numGates;
+    /**
+     * Número de puertas actualmente libres.
+     */
+    public long getGatesAvailable() {
+        return gates.stream().filter(Gate::isAvailable).count();
     }
 
-    public List<Runway> getRunways() {
-        return Collections.unmodifiableList(runways);
+    /**
+     * Número de aviones esperando pista.
+     */
+    public long getPlanesWaitingForRunway() {
+        return planes.stream()
+                .filter(a -> a.getStatePlane() == AirplaneState.WAITING_FYI)
+                .count();
     }
 
-    public List<Gate> getGates() {
-        return Collections.unmodifiableList(gates);
+    /**
+     * Retorna la configuración de aerolíneas para la simulación.
+     */
+    public String[] getAirlines() {
+        return new String[] {
+                "AeroCol", "Latam", "Avianca", "Copa", "Wingo",
+                "EasyFly", "JetBlue", "Delta", "American", "United"
+        };
     }
 
-    public List<Plane> getPlanes() {
-        return Collections.unmodifiableList(planes);
+    public AirportProperties getAirportProperties() {
+        return properties;
     }
-
-    public List<EventoLog> getLogEventos() {
-        return Collections.unmodifiableList(logEventos);
-    }
-
-    public boolean isSimulationActive() {
-        return simulationActive;
-    }
-
 }

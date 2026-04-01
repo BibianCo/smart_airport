@@ -1,5 +1,7 @@
 package co.edu.uptc.airport.model;
 
+import lombok.Getter;
+
 /**
  * Modelo que representa una puerta de embarque.
  * Las puertas son recursos limitados gestionados mediante un semáforo
@@ -10,6 +12,8 @@ package co.edu.uptc.airport.model;
  * @author Valentina Vega
  * @version 1.0
  */
+
+@Getter
 public class Gate {
     /** Número identificador de la puerta (base 1) */
     private final int gateNumber;
@@ -38,7 +42,7 @@ public class Gate {
      *
      * @param plane El avión que ocupa la puerta
      */
-    public synchronized void assignPlane(Plane plane) {
+    public synchronized void assign(Plane plane) {
         this.occupiedPlane = plane;
         this.usageCount++;
     }
@@ -46,7 +50,7 @@ public class Gate {
     /**
      * Libera la puerta.
      */
-    public synchronized void releasePlane() {
+    public synchronized void release() {
         this.occupiedPlane = null;
     }
 
@@ -69,28 +73,6 @@ public class Gate {
 
     public int getUsageCount() {
         return usageCount;
-    }
-
-    /**
-     * Retorna representación JSON de la puerta.
-     *
-     * @return String JSON
-     */
-    public String toJson() {
-
-        String planeJson = occupiedPlane != null ? String.format(
-                "{\"idPlane\":\"%s\",\"namePlane\":\"%s\"}",
-                occupiedPlane.getIdPlane(),
-                occupiedPlane.getNamePlane()) : "null";
-        return String.format(
-                "{\"gateNumber\":%d,\"disponible\":%b,\"occupiedPlane\":%s,\"usageCount\":%d}",
-                gateNumber, isAvailable(), planeJson, usageCount);
-    }
-
-    @Override
-    public String toString() {
-        return String.format("Gate{gateNumber=%d, isAvailable=%b, occupiedPlane=%s}",
-                gateNumber, isAvailable(), occupiedPlane != null ? occupiedPlane.getIdPlane() : "none");
     }
 
 }
