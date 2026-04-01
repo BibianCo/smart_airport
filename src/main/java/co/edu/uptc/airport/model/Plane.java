@@ -1,52 +1,64 @@
 package co.edu.uptc.airport.model;
 
 import java.time.Instant;
-
 import lombok.Getter;
 import lombok.ToString;
 
 /**
  * Modelo que representa un avión en la simulación del aeropuerto.
- * Cada avión tiene un identificador único, un estado y referencias a los
- * recursos que ocupa (pista y puerta de embarque).
- *
- * @author Bibian Corredor
- * @author Valentina Vega
+ * Cada avión actúa como un hilo independiente en el sistema.
  */
-
 @Getter
 @ToString
 public class Plane {
-    /** Identificador único del avión (ej: AV-001) */
-    private final String idPlane;
 
-    /** Nombre descriptivo o aerolínea del avión */
+    private final String idPlane;
     private final String namePlane;
 
     /**
-     * Estado actual del avión en el sistema
-     * se utiliza volatile para asegurar visibilidad entre hilos sin necesidad de
-     * sincronización adicional en getters
+     * Estado actual del avión.
+     * Se usa volatile para garantizar que cuando el hilo del avión cambie el
+     * estado,
+     * la interfaz web lo vea inmediatamente sin retrasos de caché de CPU.
      */
     private volatile AirplaneState statePlane;
 
-    /** Número de puerta asignada (-1 si no tiene puerta) */
+    /** Número de puerta asignada (-1 si ninguna) */
     private volatile int assignedDoor;
 
-    /** Número de pista asignada (-1 si no tiene pista) */
+    /** Número de pista asignada (-1 si ninguna) */
     private volatile int assignedRunway;
 
-    /** instante de creación del avión */
+    /** Instante de creación para calcular tiempos de espera si es necesario */
     private final Instant creationPlane;
 
     public Plane(String idPlane, String namePlane) {
         this.idPlane = idPlane;
         this.namePlane = namePlane;
-        this.statePlane = AirplaneState.WAITING_FYI; // Estado inicial
-        this.assignedDoor = -1; // Sin puerta asignada inicialmente
-        this.assignedRunway = -1; // Sin pista asignada inicialmente
+        // Estado inicial coherente con el nuevo flujo
+        this.statePlane = AirplaneState.WAITING_FOR_LANDING;
+        this.assignedDoor = -1;
+        this.assignedRunway = -1;
         this.creationPlane = Instant.now();
     }
+
+    // --- SETTERS SINCRONIZADOS ---
+    // Aunque usamos volatile, los setters se sincronizan para evitar
+    // escrituras inconsistentes en momentos de alta carga.
+
+    public synchronized void setStatePlane(AirplaneState statePlane) {
+        this.statePlane = statePlane;
+    }
+
+    public synchronized void setAssignedDoor(int assignedDoor) {
+        this.assignedDoor = assignedDoor;
+    }
+
+    public synchronized void setAssignedRunway(int assignedRunway) {
+        this.assignedRunway = assignedRunway;
+    }
+
+    // --- GETTERS ---
 
     public String getIdPlane() {
         return idPlane;
@@ -56,32 +68,19 @@ public class Plane {
         return namePlane;
     }
 
-    public Instant getCreationPlane() {
-        return creationPlane;
-    }
-
     public AirplaneState getStatePlane() {
         return statePlane;
-    }
-
-    public synchronized void setStatePlane(AirplaneState statePlane) {
-        this.statePlane = statePlane;
     }
 
     public int getAssignedDoor() {
         return assignedDoor;
     }
 
-    public synchronized void setAssignedDoor(int assignedDoor) {
-        this.assignedDoor = assignedDoor;
-    }
-
     public int getAssignedRunway() {
         return assignedRunway;
     }
 
-    public synchronized void setAssignedRunway(int assignedTrack) {
-        this.assignedRunway = assignedTrack;
+    public Instant getCreationPlane() {
+        return creationPlane;
     }
-
 }

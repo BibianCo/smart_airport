@@ -180,67 +180,81 @@ public class AirportService {
      * @param plane avión en ejecución
      */
     public void airplaneCycle(Plane plane) {
+        Runway runway = null;
+        boolean gatePermitAcquired = false;
 
         try {
-            // Fase 1: Solicitar pista
-            plane.setStatePlane(AirplaneState.WAITING_FYI);
-            registerEvent(EventType.INFO, "Solicitando pista", plane.getIdPlane());
+            // --- FASE 1: ATERRIZAJE (Sincronización Compuesta) ---
+            plane.setStatePlane(AirplaneState.WAITING_FOR_LANDING); // Nuevo Estado
+            while (runway == null || !gatePermitAcquired) {
+                if (!gatePermitAcquired)
+                    gatePermitAcquired = gateSemaphore.tryAcquire();
+                if (gatePermitAcquired) {
+                    runway = findAndAcquireRunway(plane);
+                    if (runway == null) {
+                        gateSemaphore.release();
+                        gatePermitAcquired = false;
+                    }
+                }
+                if (runway == null)
+                    Thread.sleep(500);
+            }
 
-            Runway runway = findAndAcquireRunway(plane);
+            // Uso de pista para aterrizar
             plane.setAssignedRunway(runway.getRunwayNumber());
+            plane.setStatePlane(AirplaneState.LANDING);
+            registerEvent(EventType.INFO, "Aterrizando...", plane.getIdPlane());
+            Thread.sleep(randomTime(2000, 4000));
 
-            // Fase 2: Uso de pista
-            plane.setStatePlane(AirplaneState.ON_RUNWAY);
-            registerEvent(EventType.RUNWAY_OCCUPIED,
-                    "Usando pista " + runway.getRunwayNumber(),
-                    plane.getIdPlane());
+            // Liberar pista tras aterrizar
+            runway.release();
+            runway = null;
+            plane.setAssignedRunway(-1);
 
-            int runwayTime = randomTime(properties.getTiempoMinRunwayMs(), properties.getTiempoMaxRunwayMs());
-            Thread.sleep(runwayTime);
+            // --- FASE 2: ESTACIONAMIENTO (Puerta) ---
+            plane.setStatePlane(AirplaneState.TOWARDS_GATE);
+            Gate gate = findAvailableGate(plane);
+            plane.setAssignedDoor(gate.getGateNumber());
+            plane.setStatePlane(AirplaneState.AT_GATE);
+            registerEvent(EventType.GATE_OCCUPIED, "En puerta " + gate.getGateNumber(), plane.getIdPlane());
 
-            // Fase 3: Liberar pista
+            Thread.sleep(randomTime(5000, 8000)); // Tiempo en puerta
+
+            // --- FASE 3: DESPEGUE (Requiere Pista otra vez) ---
+            plane.setStatePlane(AirplaneState.WAITING_FOR_TAKEOFF);
+            registerEvent(EventType.INFO, "Solicitando pista para despegue", plane.getIdPlane());
+
+            // Liberamos la puerta ANTES de pedir pista de despegue para no bloquear el
+            // aeropuerto
+            gate.release();
+            gateSemaphore.release();
+            plane.setAssignedDoor(-1);
+
+            // Pedir pista para despegar
+            while (runway == null) {
+                runway = findAndAcquireRunway(plane);
+                if (runway == null)
+                    Thread.sleep(500);
+            }
+
+            plane.setAssignedRunway(runway.getRunwayNumber());
+            plane.setStatePlane(AirplaneState.TAKEOFF);
+            registerEvent(EventType.INFO, "Despegando...", plane.getIdPlane());
+            Thread.sleep(randomTime(2000, 4000));
+
             runway.release();
             plane.setAssignedRunway(-1);
 
-            registerEvent(EventType.RUNWAY_CLEARED, "Pista liberada", plane.getIdPlane());
-
-            // Fase 4: Solicitar puerta
-            plane.setStatePlane(AirplaneState.TOWARDS_DOOR);
-            registerEvent(EventType.INFO, "Solicitando puerta de embarque", plane.getIdPlane());
-
-            /*
-             * acquire() del semáforo de conteo:
-             * - Si hay puertas libres (valor > 0): pasa inmediatamente
-             * - Si todas ocupadas (valor = 0): bloquea hasta que algún
-             * avión haga release()
-             */
-            gateSemaphore.acquire();
-
-            Gate gate = findAvailableGate(plane);
-            plane.setAssignedDoor(gate.getGateNumber());
-
-            // Fase 5: Uso de puerta
-            plane.setStatePlane(AirplaneState.AT_DOOR);
-            registerEvent(EventType.GATE_OCCUPIED, "En puerta " + gate.getGateNumber(), plane.getIdPlane());
-
-            int gateTime = randomTime(properties.getTiempoMinGateMs(), properties.getTiempoMaxGateMs());
-            Thread.sleep(gateTime);
-
-            // Fase 6: Liberar puerta
-            gate.release();
-            plane.setAssignedDoor(-1);
-            gateSemaphore.release();
-
-            registerEvent(EventType.GATE_CLEARED, "Puerta liberada", plane.getIdPlane());
-
-            // Fase 7: Finalización
-            plane.setStatePlane(AirplaneState.FILLED);
-            registerEvent(EventType.PLANE_COMPLETED, "Ciclo completado", plane.getIdPlane());
-            log.info("Avión {} completó su ciclo", plane.getIdPlane());
+            // --- FINALIZACIÓN ---
+            plane.setStatePlane(AirplaneState.COMPLETED);
+            registerEvent(EventType.PLANE_COMPLETED, "Vuelo finalizado con éxito", plane.getIdPlane());
 
         } catch (InterruptedException e) {
+            if (runway != null)
+                runway.release();
+            if (gatePermitAcquired)
+                gateSemaphore.release();
             plane.setStatePlane(AirplaneState.LOCKED);
-            registerEvent(EventType.ERROR, "Avión interrumpido", plane.getIdPlane());
             Thread.currentThread().interrupt();
         }
     }
@@ -253,25 +267,18 @@ public class AirportService {
      */
     private Runway findAndAcquireRunway(Plane plane) throws InterruptedException {
 
-        while (true) {
-            for (Runway runway : runways) {
-                if (runway.getSemaforo().tryAcquire()) {
-                    // Semáforo binario adquirido → marcar pista como ocupada
-                    runway.acquire(plane);
+        for (Runway runway : runways) {
+            if (runway.getSemaforo().tryAcquire()) {
+                runway.acquire(plane);
 
-                    // Corregir doble-adquisición: tryAcquire ya adquirió,
-                    // adquirir() hace acquire() interno — usar versión directa:
-                    registerEvent(EventType.DEADLOCK_PREVENTION,
-                            "Pista " + runway.getRunwayNumber() + " adquirida (orden global aplicado)",
-                            plane.getIdPlane());
+                registerEvent(EventType.DEADLOCK_PREVENTION,
+                        "Pista " + runway.getRunwayNumber() + " adquirida (orden global aplicado)",
+                        plane.getIdPlane());
 
-                    return runway;
-
-                }
+                return runway;
             }
-            // Si no se pudo adquirir ninguna pista, esperar un poco antes de reintentar
-            Thread.sleep(200);
         }
+        return null;
     }
 
     /**
@@ -467,7 +474,7 @@ public class AirportService {
      */
     public List<Plane> getActivePlane() {
         return planes.stream()
-                .filter(a -> a.getStatePlane() != AirplaneState.FILLED)
+                .filter(a -> a.getStatePlane() != AirplaneState.COMPLETED)
                 .toList();
     }
 
@@ -478,7 +485,7 @@ public class AirportService {
      */
     public List<Plane> getCompletedPlanes() {
         return planes.stream()
-                .filter(a -> a.getStatePlane() == AirplaneState.FILLED)
+                .filter(a -> a.getStatePlane() == AirplaneState.COMPLETED)
                 .toList();
     }
 
@@ -501,7 +508,7 @@ public class AirportService {
      */
     public long getPlanesWaitingForRunway() {
         return planes.stream()
-                .filter(a -> a.getStatePlane() == AirplaneState.WAITING_FYI)
+                .filter(a -> a.getStatePlane() == AirplaneState.WAITING_FOR_LANDING)
                 .count();
     }
 

@@ -1,27 +1,34 @@
 package co.edu.uptc.airport.model;
 
 /**
- * Enumeración de los posibles estados de un avión.
+ * Enumeración de los posibles estados de un avión en su ciclo de vida
+ * concurrente.
  */
 public enum AirplaneState {
 
-    /** Avión esperando para aterrizar */
-    WAITING_FYI("Esperando pista"),
+    /** Fase 1: Sincronización compuesta (esperando pista y puerta) */
+    WAITING_FOR_LANDING("Esperando aterrizaje"),
 
-    /** Avión actualmente aterrizando o despegando en una pista */
-    ON_RUNWAY("En pista"),
+    /** Fase 2: Sección crítica - Uso de pista para aterrizar */
+    LANDING("Aterrizando"),
 
-    /** Avión trasladándose hacia la puerta */
-    TOWARDS_DOOR("Hacia la puerta"),
+    /** Fase 3: Traslado tras aterrizar */
+    TOWARDS_GATE("Hacia la puerta"),
 
-    /** Avión estacionado en una puerta de embarque */
-    AT_DOOR("En la puerta"),
+    /** Fase 4: Recurso limitado - Estacionado en puerta de embarque */
+    AT_GATE("En la puerta"),
 
-    /** Avión que completó su ciclo y fue liberado */
-    FILLED("Completado"),
+    /** Fase 5: Esperando pista nuevamente para salir */
+    WAITING_FOR_TAKEOFF("Esperando despegue"),
 
-    /** Avión bloqueado esperando múltiples recursos (posible deadlock) */
-    LOCKED("Bloqueado");
+    /** Fase 6: Sección crítica - Uso de pista para despegar */
+    TAKEOFF("Despegando"),
+
+    /** Fin: El hilo ha terminado su ejecución exitosamente */
+    COMPLETED("Vuelo completado"),
+
+    /** Estado de error o interrupción */
+    LOCKED("Bloqueado / Error");
 
     private final String description;
 
@@ -32,5 +39,4 @@ public enum AirplaneState {
     public String getDescription() {
         return description;
     }
-
 }

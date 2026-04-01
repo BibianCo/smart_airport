@@ -118,23 +118,8 @@
                 <p class="widget-desc">Lanza 5 hilos sobre un recurso compartido para mostrar la condición de carrera
                     vs. exclusión mutua.</p>
                 <button class="btn btn-race" onclick="demostrarCarrera()">
-                    ⚡ CONDICIÓN DE CARRERA
+                    CONDICIÓN DE CARRERA
                 </button>
-                <div class="race-legend">
-                    <span class="legend-r"><span class="dot r"></span>Sin exclusión mutua</span>
-                    <span class="legend-r"><span class="dot g"></span>Con exclusión mutua</span>
-                </div>
-            </div>
-
-            <!-- Teoría -->
-            <div class="widget">
-                <div class="widget-label">CONCEPTOS SO</div>
-                <div class="teoria-btns">
-                    <button class="tbtn" onclick="abrirTeoria('semaforos')">📘 Semáforos</button>
-                    <button class="tbtn" onclick="abrirTeoria('deadlock')">🔒 Deadlocks</button>
-                    <button class="tbtn" onclick="abrirTeoria('carrera')">⚡ Race Cond.</button>
-                    <button class="tbtn" onclick="abrirTeoria('mutual')">🛡 Excl. Mutua</button>
-                </div>
             </div>
 
         </aside>
@@ -175,6 +160,15 @@
             </section>
 
         </main>
+
+        <!-- ── LOG PANEL ── -->
+        <aside class="log-panel">
+            <div class="log-head">
+                <span class="section-title">LOG CONCURRENTE</span>
+                <button class="btn-clear" onclick="limpiarLog()">CLR</button>
+            </div>
+            <div id="logScroll" class="log-scroll"></div>
+        </aside>
 
     </div><!-- /.app-layout -->
 

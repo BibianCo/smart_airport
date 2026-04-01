@@ -5,36 +5,32 @@
    ═══════════════════════════════════════════════════════════ */
 
 :root {
-    --bg: #060a0f;
-    --bg-1: #0b1018;
-    --bg-2: #101620;
-    --bg-3: #141c28;
-    --border: rgba(255, 255, 255, 0.07);
-    --border-2: rgba(255, 255, 255, 0.12);
+    --bg: #f4f7fb;
+    --bg-1: #ffffff;
+    --bg-2: #f1f5f9;
+    --bg-3: #e2e8f0;
 
-    --txt: #dce6f0;
-    --txt-2: #7a8fa8;
-    --txt-3: #3d5068;
+    --border: #e2e8f0;
+    --border-2: #cbd5e1;
 
-    --green: #00e5a0;
-    --green-dim: rgba(0, 229, 160, 0.1);
-    --green-glow: 0 0 20px rgba(0, 229, 160, 0.3);
+    --txt: #0f172a;
+    --txt-2: #475569;
+    --txt-3: #94a3b8;
 
-    --blue: #38bdf8;
-    --blue-dim: rgba(56, 189, 248, 0.1);
-    --blue-glow: 0 0 20px rgba(56, 189, 248, 0.25);
+    --green: #10b981;
+    --green-dim: rgba(16, 185, 129, 0.1);
 
-    --amber: #fbbf24;
-    --amber-dim: rgba(251, 191, 36, 0.1);
+    --blue: #3b82f6;
+    --blue-dim: rgba(59, 130, 246, 0.1);
 
-    --red: #f87171;
-    --red-dim: rgba(248, 113, 113, 0.1);
-    --red-glow: 0 0 20px rgba(248, 113, 113, 0.3);
+    --amber: #f59e0b;
+    --amber-dim: rgba(245, 158, 11, 0.1);
 
-    --purple: #a78bfa;
-    --purple-dim: rgba(167, 139, 250, 0.1);
+    --red: #ef4444;
+    --red-dim: rgba(239, 68, 68, 0.1);
 
-    --cyan: #22d3ee;
+    --purple: #8b5cf6;
+    --cyan: #06b6d4;
 
     --mono: 'DM Mono', monospace;
     --disp: 'Bricolage Grotesque', sans-serif;
@@ -67,6 +63,7 @@ body {
 
 /* Scanline overlay */
 .scanline {
+    display: none;
     pointer-events: none;
     position: fixed;
     inset: 0;
@@ -561,7 +558,6 @@ body {
     scrollbar-color: var(--bg-3) transparent;
 }
 
-.resource-section {}
 
 .section-head {
     display: flex;
@@ -821,6 +817,38 @@ body {
 .state-BLOQUEADO {
     background: rgba(167, 139, 250, 0.15);
     color: var(--purple);
+}
+
+/* Estados del Avión (Hilos) */
+.state-landing {
+    color: var(--blue);
+    font-weight: bold;
+}
+
+.state-at-gate {
+    color: var(--amber);
+    font-weight: bold;
+}
+
+.state-takeoff {
+    color: var(--purple);
+    font-weight: bold;
+}
+
+.state-waiting {
+    color: var(--txt-muted);
+    font-style: italic;
+}
+
+/* Estilo para cuando el avión ocupa la pista (Aterrizando o Despegando) */
+.flight-item.active {
+    border-left: 3px solid var(--red);
+    background: var(--red-dim);
+}
+
+/* Animación sutil para el badge de movimiento */
+.state-EN_PISTA {
+    animation: blink 1.5s infinite;
 }
 
 .fi-res {
