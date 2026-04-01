@@ -75,12 +75,6 @@ public class AirportService {
      */
     private Semaphore gateSemaphore;
 
-    /**
-     * Semáforos binarios para pistas.
-     * Cada pista tiene un semáforo independiente que garantiza exclusión mutua.
-     */
-    private List<Semaphore> runwaySemaphores;
-
     /** Lista de aviones en el sistema (thread-safe) */
     @Getter
     private CopyOnWriteArrayList<Plane> planes;
@@ -438,12 +432,12 @@ public class AirportService {
 
                 if (unsafeResource < esperado) {
                     registerEvent(EventType.RACE_CONDITION,
-                            "✗ CARRERA DETECTADA: se perdieron " + (esperado - unsafeResource)
+                            "CARRERA DETECTADA: se perdieron " + (esperado - unsafeResource)
                                     + " incrementos por falta de exclusión mutua",
                             null);
                 }
                 registerEvent(EventType.INFO,
-                        "✓ EXCLUSIÓN MUTUA: recurso protegido = " + secureResource
+                        "EXCLUSIÓN MUTUA: recurso protegido = " + secureResource
                                 + " (valor correcto garantizado)",
                         null);
             } catch (InterruptedException e) {

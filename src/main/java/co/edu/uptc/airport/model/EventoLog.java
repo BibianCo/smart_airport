@@ -3,6 +3,8 @@ package co.edu.uptc.airport.model;
 import java.time.LocalTime;
 import java.time.format.DateTimeFormatter;
 
+import lombok.Getter;
+
 /**
  * Modelo que representa un evento registrado en el log concurrente del
  * aeropuerto.
@@ -16,6 +18,8 @@ import java.time.format.DateTimeFormatter;
  * @author Valentina Vega
  * @version 1.0
  */
+
+@Getter
 public class EventoLog {
 
     /** Formateador de tiempo para mostrar HH:mm:ss.SSS */

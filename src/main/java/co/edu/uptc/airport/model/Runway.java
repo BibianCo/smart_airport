@@ -1,7 +1,6 @@
 package co.edu.uptc.airport.model;
 
 import java.util.concurrent.Semaphore;
-import java.util.concurrent.locks.ReentrantLock;
 
 import lombok.Getter;
 
@@ -69,7 +68,7 @@ public class Runway {
      * @throws InterruptedException si el hilo es interrumpido mientras espera
      */
     public void acquire(Plane plane) throws InterruptedException {
-        semaforo.acquire(); // P(semaforo) — bloquea si valor = 0
+        // semaforo.acquire(); // P(semaforo) — bloquea si valor = 0
         planeActual = plane; // Registra el avión que ocupa la pista
         useTotal++; // Incrementa el contador de usos
     }

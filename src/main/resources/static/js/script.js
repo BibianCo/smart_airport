@@ -1,279 +1,213 @@
 /**
- * app.js — Lógica principal de la interfaz web del Aeropuerto Inteligente
+ * app.js — Lógica del frontend AeroSim (Spring Boot Edition)
  *
- * Responsabilidades:
- * - Polling al servidor Java cada 500ms para obtener el estado
- * - Renderizar pistas, puertas, aviones y log en el DOM
- * - Controlar las acciones del usuario (iniciar, detener, agregar avión, etc.)
- * - Detectar el modo de demostración (sin servidor) para modo preview
+ * Estrategia: Polling cada 500ms a GET /api/estado
+ * Spring Boot sirve este archivo desde src/main/resources/static/
+ * y expone la API REST en /api/**.
  *
- * Patrón: El servidor Java expone /api/estado en JSON.
- * El frontend hace polling y actualiza el DOM sin recargar la página.
+ * El frontend es un SPA (Single Page App) sin frameworks —
+ * manipulación directa del DOM para máximo rendimiento.
  */
 
-// ── Configuración ──
-const API_BASE = 'http://localhost:8080';
-const POLL_INTERVAL_MS = 500;
+'use strict';
 
-// ── Estado local ──
-let estadoAnterior = null;
-let intervaloPolling = null;
-let logEntradas = [];
-let modoDemo = false; // true si el servidor Java no está disponible
+// ── Config ──────────────────────────────────────
+const POLL_MS = 500;
+let pollingId = null;
+let logCache = [];     // cache local del log para no redibujar todo
 
-// ══════════════════════════════════════════════════
-//  INICIALIZACIÓN
-// ══════════════════════════════════════════════════
+// ═══════════════════════════════════════════════
+//  ARRANQUE
+// ═══════════════════════════════════════════════
 
 document.addEventListener('DOMContentLoaded', () => {
-    inicializarPlaceholders();
     iniciarPolling();
-    console.log('AeroSim iniciado. Conectando con servidor Java en', API_BASE);
+    renderPlaceholders();
 });
 
-/**
- * Muestra placeholders de carga mientras se conecta al servidor.
- */
-function inicializarPlaceholders() {
-    renderizarPistas([
-        { numero: 1, disponible: true, avionActual: null, usosTotales: 0 },
-        { numero: 2, disponible: true, avionActual: null, usosTotales: 0 },
-        { numero: 3, disponible: true, avionActual: null, usosTotales: 0 },
-    ]);
-    renderizarPuertas([
-        { numero: 1, disponible: true, avionActual: null },
-        { numero: 2, disponible: true, avionActual: null },
-        { numero: 3, disponible: true, avionActual: null },
-        { numero: 4, disponible: true, avionActual: null },
-        { numero: 5, disponible: true, avionActual: null },
-    ]);
-}
-
-// ══════════════════════════════════════════════════
-//  POLLING
-// ══════════════════════════════════════════════════
-
-/**
- * Inicia el polling periódico al servidor Java.
- * Si el servidor no responde, activa el modo demostración.
- */
 function iniciarPolling() {
-    intervaloPolling = setInterval(async () => {
+    pollingId = setInterval(async () => {
         try {
-            const respuesta = await fetch(`${API_BASE}/api/estado`, {
-                signal: AbortSignal.timeout(1000)
-            });
-            if (!respuesta.ok) throw new Error('Respuesta no OK');
-            const estado = await respuesta.json();
-            modoDemo = false;
-            actualizarUI(estado);
-        } catch (err) {
-            if (!modoDemo) {
-                modoDemo = true;
-                mostrarModoDemo();
-            }
+            const res = await fetch('/api/state');
+            if (!res.ok) throw new Error('HTTP ' + res.status);
+            const data = await res.json();
+            actualizarUI(data);
+        } catch (e) {
+            // Servidor no disponible — no hacer nada visible
         }
-    }, POLL_INTERVAL_MS);
+    }, POLL_MS);
 }
+
+// ═══════════════════════════════════════════════
+//  ACTUALIZACIÓN DE UI
+// ═══════════════════════════════════════════════
 
 /**
- * Actualiza toda la interfaz con el estado recibido del servidor.
- * @param {Object} estado - Objeto JSON con el estado del aeropuerto
+ * Punto de entrada de actualización.
+ * Recibe el DTO EstadoAeropuerto mapeado por Spring/Jackson.
+ *
+ * @param {Object} d - EstadoAeropuerto JSON
  */
-function actualizarUI(estado) {
-    renderizarPistas(estado.pistas || []);
-    renderizarPuertas(estado.puertas || []);
-    renderizarAviones(estado.avionesActivos || []);
-    actualizarEstadisticas(estado.estadisticas || {});
-    actualizarLog(estado.log || []);
-    actualizarStatusPill(estado.simulacionActiva);
-    actualizarBotones(estado.simulacionActiva);
+function actualizarUI(d) {
+    renderPistas(d.runways || []);
+    renderPuertas(d.gates || []);
+    renderVuelos(d.planes || []);
+    renderMetricas(d.statistics || {});
+    appendLog(d.log || []);
+    actualizarStatus(d.simulationActive);
+    actualizarBotones(d.simulationActive);
 }
 
-// ══════════════════════════════════════════════════
-//  RENDERIZADO DE PISTAS
-// ══════════════════════════════════════════════════
+// ─── PISTAS ────────────────────────────────────
 
 /**
  * Renderiza las tarjetas de pistas de aterrizaje.
- * Cada pista muestra si está libre u ocupada y por qué avión.
+ * Cada pista muestra si su semáforo binario está adquirido (ocupada) o libre.
  *
- * @param {Array} pistas - Lista de objetos pista
+ * @param {Array} runways - Lista de PistaDto
  */
-function renderizarPistas(pistas) {
-    const grid = document.getElementById('pistasGrid');
-    grid.innerHTML = pistas.map(pista => {
-        const libre = pista.disponible;
-        const avionInfo = pista.avionActual
-            ? `${pista.avionActual.id} · ${pista.avionActual.nombre}`
-            : 'Libre';
+function renderPistas(pistas) {
+    const g = document.getElementById('pistasGrid');
+    g.innerHTML = pistas.map(p => {
+        const cls = p.available ? 'libre' : 'ocupada';
+        const txt = p.available ? '● LIBRE' : '● OCUPADA';
+        const info = p.idPlane ? `${p.idPlane} · ${p.namePlane}` : 'Sin avión';
         return `
-      <div class="pista-card ${libre ? 'libre' : 'ocupada'}">
-        <div class="pista-numero">PISTA ${pista.numero}</div>
-        <div class="pista-estado">${libre ? '● Disponible' : '● En uso'}</div>
-        <div class="pista-avion">${avionInfo}</div>
-        <div class="pista-usos">Usos totales: ${pista.usosTotales}</div>
-        <div class="pista-icon">✈</div>
-      </div>
-    `;
+      <div class="runway-card ${cls}">
+        <div class="rw-num">PISTA ${p.number}</div>
+        <div class="rw-status">${txt}</div>
+        <div class="rw-avion">${info}</div>
+        <div class="rw-usos">Usos: ${p.usesTotal}</div>
+        <div class="rw-icon">✈</div>
+      </div>`;
     }).join('');
 }
 
-// ══════════════════════════════════════════════════
-//  RENDERIZADO DE PUERTAS
-// ══════════════════════════════════════════════════
+// ─── PUERTAS ───────────────────────────────────
 
 /**
  * Renderiza las tarjetas de puertas de embarque.
- * Las puertas son gestionadas por el semáforo de conteo.
+ * El semáforo de conteo controla cuántas pueden estar ocupadas.
  *
- * @param {Array} puertas - Lista de objetos puerta
+ * @param {Array} puertas - Lista de PuertaDto
  */
-function renderizarPuertas(puertas) {
-    const grid = document.getElementById('puertasGrid');
-    grid.innerHTML = puertas.map(puerta => {
-        const libre = puerta.disponible;
-        const avionInfo = puerta.avionActual
-            ? `${puerta.avionActual.id}`
-            : '—';
+function renderPuertas(puertas) {
+    const g = document.getElementById('puertasGrid');
+    g.innerHTML = puertas.map(p => {
+        const cls = p.available ? 'libre' : 'ocupada';
+        const txt = p.available ? '○ Libre' : '● Ocupada';
+        const info = p.idPlane || '—';
         return `
-      <div class="puerta-card ${libre ? 'libre' : 'ocupada'}">
-        <div class="puerta-numero">PUERTA ${puerta.numero}</div>
-        <div class="puerta-estado">${libre ? '○ Libre' : '● Ocupada'}</div>
-        <div class="puerta-avion">${avionInfo}</div>
-      </div>
-    `;
+      <div class="gate-card ${cls}">
+        <div class="gate-num">PUERTA ${p.number}</div>
+        <div class="gate-status">${txt}</div>
+        <div class="gate-avion">${info}</div>
+      </div>`;
     }).join('');
 }
 
-// ══════════════════════════════════════════════════
-//  RENDERIZADO DE AVIONES
-// ══════════════════════════════════════════════════
+// ─── VUELOS ACTIVOS ─────────────────────────────
 
 /**
  * Renderiza la lista de aviones activos (hilos en ejecución).
- * Cada avión muestra su ID, nombre, estado y recursos asignados.
+ * Cada fila muestra ID, aerolínea, estado y recursos asignados.
  *
- * @param {Array} aviones - Lista de aviones activos
+ * @param {Array} aviones - Lista de AvionDto
  */
-function renderizarAviones(aviones) {
-    const lista = document.getElementById('avionesList');
-    const badge = document.getElementById('badgeAviones');
-
-    badge.textContent = `${aviones.length} hilo${aviones.length !== 1 ? 's' : ''}`;
+function renderVuelos(aviones) {
+    const lista = document.getElementById('flightList');
+    const badge = document.getElementById('badgeVuelos');
+    badge.textContent = `${aviones.length} HILO${aviones.length !== 1 ? 'S' : ''}`;
 
     if (aviones.length === 0) {
-        lista.innerHTML = `
-      <div class="empty-state">
-        <div class="empty-icon">✈</div>
-        <div class="empty-text">No hay aviones activos.<br>Inicia la simulación o agrega uno manualmente.</div>
-      </div>`;
+        lista.innerHTML = `<div class="empty-msg"><span>Sin vuelos activos.</span></div>`;
         return;
     }
 
-    lista.innerHTML = aviones.map(avion => {
-        const recursosPista = avion.pistaAsignada > 0 ? `P${avion.pistaAsignada}` : '—';
-        const recursosPuerta = avion.puertaAsignada > 0 ? `G${avion.puertaAsignada}` : '—';
+    lista.innerHTML = aviones.map(a => {
 
+        const pista = a.runwayNumber > 0 ? `P${a.runwayNumber}` : '—';
+        const puerta = a.gateNumber > 0 ? `G${a.gateNumber}` : '—';
         return `
-      <div class="avion-item">
-        <span class="avion-id">${avion.id}</span>
-        <span class="avion-nombre">${avion.nombre}</span>
-        <span class="avion-estado-badge estado-${avion.estado}">${avion.estadoDesc}</span>
-        <span class="avion-recursos">Pista:${recursosPista} Puerta:${recursosPuerta}</span>
-      </div>
-    `;
+      <div class="flight-item">
+        <span class="fi-id">${a.idPlane}</span>
+        <span class="fi-name">${a.namePlane}</span>
+        <span class="fi-badge state-${a.statusDesc}">${a.status}</span>
+        <span class="fi-res">${pista} / ${puerta}</span>
+      </div>`;
     }).join('');
 }
 
-// ══════════════════════════════════════════════════
-//  ESTADÍSTICAS
-// ══════════════════════════════════════════════════
+// ─── MÉTRICAS ──────────────────────────────────
 
 /**
- * Actualiza los contadores estadísticos del panel izquierdo.
+ * Actualiza los contadores numéricos con animación de escala.
  *
- * @param {Object} stats - Objeto con las estadísticas
+ * @param {Object} s - EstadisticasDto
  */
-function actualizarEstadisticas(stats) {
-    setValorConAnimacion('statPistasLibres', stats.pistasLibres ?? '—');
-    setValorConAnimacion('statPuertasLibres', stats.puertasLibres ?? '—');
-    setValorConAnimacion('statEsperando', stats.esperandoPista ?? '—');
-    setValorConAnimacion('statCompletados', stats.avionesCompletados ?? '—');
+function renderMetricas(s) {
+    setMet('mPistasLibres', s.runwayFree ?? '0');
+    setMet('mPuertasLibres', s.gateFree ?? '0');
+    setMet('mEsperando', s.waitRunway ?? '0');
+    setMet('mCompletados', s.planesCompleted ?? '0');
 }
 
-/**
- * Actualiza un elemento de estadística con animación de cambio.
- */
-function setValorConAnimacion(id, valor) {
+function setMet(id, val) {
     const el = document.getElementById(id);
-    if (!el) return;
-    if (el.textContent !== String(valor)) {
-        el.style.transform = 'scale(1.2)';
-        el.textContent = valor;
-        setTimeout(() => { el.style.transform = 'scale(1)'; }, 150);
-    }
+    if (!el || el.textContent === String(val)) return;
+    el.style.transform = 'scale(1.25)';
+    el.textContent = val;
+    setTimeout(() => el.style.transform = 'scale(1)', 150);
 }
 
-// ══════════════════════════════════════════════════
-//  LOG DE EVENTOS
-// ══════════════════════════════════════════════════
+// ─── LOG ───────────────────────────────────────
 
 /**
- * Actualiza el log de eventos concurrentes.
- * Solo agrega entradas nuevas para evitar parpadeo.
+ * Agrega al log solo las entradas nuevas (no redibuja todo).
+ * Mantiene auto-scroll al final.
  *
- * @param {Array} eventosNuevos - Lista de eventos del servidor
+ * @param {Array} eventos - Lista de EventoLogDto más recientes
  */
-function actualizarLog(eventosNuevos) {
-    if (!eventosNuevos || eventosNuevos.length === 0) return;
+function appendLog(eventos) {
+    if (!eventos || eventos.length === 0) return;
 
-    const container = document.getElementById('logContainer');
-    const totalActual = logEntradas.length;
+    const scroll = document.getElementById('logScroll');
+    const yaHay = logCache.length;
+    const nuevos = eventos.slice(yaHay);
 
-    // Agregar solo eventos nuevos
-    const nuevos = eventosNuevos.slice(Math.max(0, eventosNuevos.length - (eventosNuevos.length - totalActual)));
-
-    // Sincronizar log local con el del servidor
-    logEntradas = eventosNuevos;
-
-    container.innerHTML = '';
-    eventosNuevos.forEach(evento => {
+    nuevos.forEach(ev => {
         const div = document.createElement('div');
-        div.className = `log-entry ${evento.tipo}`;
+        div.className = `log-entry log-${ev.tipo}`;
         div.innerHTML = `
-      <span class="log-time">${evento.timestamp}</span>
-      <span class="log-msg">${evento.avionId ? `[${evento.avionId}] ` : ''}${evento.mensaje}</span>
-    `;
-        container.appendChild(div);
+      <span class="log-ts">${ev.timestamp}</span>
+      <span class="log-msg">${ev.avionId ? `[${ev.avionId}] ` : ''}${ev.mensaje}</span>`;
+        scroll.appendChild(div);
     });
 
-    // Auto-scroll al final
-    container.scrollTop = container.scrollHeight;
+    logCache = eventos;
+
+    // Auto-scroll
+    requestAnimationFrame(() => {
+        scroll.scrollTop = scroll.scrollHeight;
+    });
 }
 
-/**
- * Limpia el log visualmente (el servidor mantiene el historial).
- */
 function limpiarLog() {
-    const container = document.getElementById('logContainer');
-    container.innerHTML = '<div class="log-entry info"><span class="log-time">—</span><span class="log-msg">Log limpiado.</span></div>';
-    logEntradas = [];
+    logCache = [];
+    document.getElementById('logScroll').innerHTML = '';
 }
 
-// ══════════════════════════════════════════════════
-//  STATUS Y BOTONES
-// ══════════════════════════════════════════════════
+// ─── STATUS ────────────────────────────────────
 
-function actualizarStatusPill(activo) {
-    const pill = document.getElementById('statusPill');
-    const texto = document.getElementById('statusText');
+function actualizarStatus(activo) {
+    const blk = document.getElementById('statusBlock');
+    const txt = document.getElementById('statusText');
     if (activo) {
-        pill.classList.add('activo');
-        texto.textContent = 'Simulación activa';
+        blk.classList.add('active');
+        txt.textContent = 'SIMULACIÓN ACTIVA';
     } else {
-        pill.classList.remove('activo');
-        texto.textContent = 'Detenido';
+        blk.classList.remove('active');
+        txt.textContent = 'SISTEMA DETENIDO';
     }
 }
 
@@ -282,223 +216,95 @@ function actualizarBotones(activo) {
     document.getElementById('btnDetener').disabled = !activo;
 }
 
-// ══════════════════════════════════════════════════
-//  ACCIONES DEL USUARIO
-// ══════════════════════════════════════════════════
+// ═══════════════════════════════════════════════
+//  ACCIONES — llaman a la API REST de Spring Boot
+// ═══════════════════════════════════════════════
 
 /**
- * Inicia la simulación automática de aviones.
+ * POST /api/iniciar — Activa el SimulacionScheduler de Spring.
  */
 async function iniciarSimulacion() {
-    await apiPost('/api/iniciar');
+    await post('/api/start');
 }
 
 /**
- * Detiene la simulación automática.
+ * POST /api/detener — Desactiva la generación automática.
  */
 async function detenerSimulacion() {
-    await apiPost('/api/detener');
+    await post('/api/stop');
 }
 
 /**
- * Reinicia toda la simulación.
+ * POST /api/reiniciar — Reinicia el AeropuertoService.
  */
 async function reiniciarSimulacion() {
-    if (!confirm('¿Reiniciar la simulación? Se perderán todos los datos actuales.')) return;
-    logEntradas = [];
-    await apiPost('/api/reiniciar');
+    if (!confirm('¿Reiniciar el sistema? Se perderán todos los datos.')) return;
+    logCache = [];
+    document.getElementById('logScroll').innerHTML = '';
+    await post('/api/reset');
 }
 
 /**
- * Agrega un nuevo avión manualmente.
+ * POST /api/avion — Agrega un avión con el nombre del input.
  */
 async function agregarAvion() {
-    const input = document.getElementById('nombreAvion');
-    const nombre = input.value.trim() || 'Avión-Manual';
-    input.value = '';
-    await apiPost('/api/avion', { nombre });
+    const inp = document.getElementById('nombreAvion');
+    const name = inp.value.trim() || 'Anónimo';
+    inp.value = '';
+    await post('/api/plane', { name: name }); // Enviamos 'name' para que coincida con getName() en Java
+}
+
+function setAerolinea(n) {
+    document.getElementById('nombreAvion').value = n;
 }
 
 /**
- * Establece el nombre de aerolínea desde los chips sugeridos.
- */
-function setAerolinea(nombre) {
-    document.getElementById('nombreAvion').value = nombre;
-}
-
-/**
- * Dispara la demostración de condición de carrera.
+ * POST /api/carrera — Lanza la demo de condición de carrera.
  */
 async function demostrarCarrera() {
-    await apiPost('/api/carrera');
+    await post('/api/race_condition');
 }
 
-// ══════════════════════════════════════════════════
-//  MODO DEMO (sin servidor)
-// ══════════════════════════════════════════════════
-
-/**
- * Activa el modo demostración cuando el servidor Java no está disponible.
- * Simula el comportamiento con datos generados en el navegador.
- */
-function mostrarModoDemo() {
-    const container = document.getElementById('logContainer');
-    container.innerHTML = `
-    <div class="log-entry CONDICION_CARRERA">
-      <span class="log-time">${ahora()}</span>
-      <span class="log-msg">⚠ Servidor Java no encontrado en localhost:8080</span>
-    </div>
-    <div class="log-entry INFO">
-      <span class="log-time">${ahora()}</span>
-      <span class="log-msg">Ejecuta Main.java para activar el backend. Mostrando modo preview.</span>
-    </div>
-  `;
-
-    // Iniciar simulación visual demo
-    iniciarSimulacionDemo();
-}
-
-/**
- * Simulación visual demo en el navegador (sin backend Java).
- * Demuestra cómo se vería la interfaz en funcionamiento.
- */
-function iniciarSimulacionDemo() {
-    const aerolineas = ['AeroCol', 'Latam', 'Avianca', 'Copa', 'Wingo', 'EasyFly'];
-    const estados = ['ESPERANDO_PISTA', 'EN_PISTA', 'HACIA_PUERTA', 'EN_PUERTA'];
-    const estadosDesc = { ESPERANDO_PISTA: 'Esperando pista', EN_PISTA: 'En pista', HACIA_PUERTA: 'Hacia puerta', EN_PUERTA: 'En puerta' };
-
-    let contadorDemo = 1;
-    let avionesDemo = [];
-    let pistasDemo = [
-        { numero: 1, disponible: true, avionActual: null, usosTotales: 0 },
-        { numero: 2, disponible: true, avionActual: null, usosTotales: 0 },
-        { numero: 3, disponible: true, avionActual: null, usosTotales: 0 },
-    ];
-    let puertasDemo = [1, 2, 3, 4, 5].map(n => ({ numero: n, disponible: true, avionActual: null }));
-    let completadosDemo = 0;
-    let logDemo = [];
-
-    function addLog(tipo, msg, avionId) {
-        logDemo.push({ tipo, mensaje: msg, avionId: avionId || '', timestamp: ahora() });
-        if (logDemo.length > 80) logDemo = logDemo.slice(-80);
-
-        const container = document.getElementById('logContainer');
-        const div = document.createElement('div');
-        div.className = `log-entry ${tipo}`;
-        div.innerHTML = `<span class="log-time">${ahora()}</span><span class="log-msg">${avionId ? `[${avionId}] ` : ''}${msg}</span>`;
-        container.appendChild(div);
-        container.scrollTop = container.scrollHeight;
-    }
-
-    function tick() {
-        // Agregar avión
-        if (avionesDemo.length < 6 && Math.random() < 0.4) {
-            const id = `AV-${String(contadorDemo++).padStart(3, '0')}`;
-            const nombre = aerolineas[Math.floor(Math.random() * aerolineas.length)];
-            const avion = { id, nombre, estado: 'ESPERANDO_PISTA', estadoDesc: 'Esperando pista', pistaAsignada: -1, puertaAsignada: -1 };
-            avionesDemo.push(avion);
-            addLog('INFO', 'Avión ingresó al sistema', id);
-        }
-
-        // Avanzar estados
-        avionesDemo.forEach(avion => {
-            const r = Math.random();
-            if (avion.estado === 'ESPERANDO_PISTA' && r < 0.5) {
-                const pistaLibre = pistasDemo.find(p => p.disponible);
-                if (pistaLibre) {
-                    pistaLibre.disponible = false;
-                    pistaLibre.avionActual = { id: avion.id, nombre: avion.nombre };
-                    pistaLibre.usosTotales++;
-                    avion.pistaAsignada = pistaLibre.numero;
-                    avion.estado = 'EN_PISTA';
-                    avion.estadoDesc = 'En pista';
-                    addLog('PISTA_OCUPADA', `Aterrizando en pista ${pistaLibre.numero}`, avion.id);
-                }
-            } else if (avion.estado === 'EN_PISTA' && r < 0.3) {
-                const pista = pistasDemo.find(p => p.numero === avion.pistaAsignada);
-                if (pista) { pista.disponible = true; pista.avionActual = null; }
-                avion.pistaAsignada = -1;
-                avion.estado = 'HACIA_PUERTA';
-                avion.estadoDesc = 'Hacia puerta';
-                addLog('PISTA_LIBERADA', `Pista ${pista ? pista.numero : '?'} liberada`, avion.id);
-            } else if (avion.estado === 'HACIA_PUERTA' && r < 0.5) {
-                const puertaLibre = puertasDemo.find(p => p.disponible);
-                if (puertaLibre) {
-                    puertaLibre.disponible = false;
-                    puertaLibre.avionActual = { id: avion.id, nombre: avion.nombre };
-                    avion.puertaAsignada = puertaLibre.numero;
-                    avion.estado = 'EN_PUERTA';
-                    avion.estadoDesc = 'En puerta';
-                    addLog('PUERTA_OCUPADA', `Estacionado en puerta ${puertaLibre.numero}`, avion.id);
-                }
-            } else if (avion.estado === 'EN_PUERTA' && r < 0.25) {
-                const puerta = puertasDemo.find(p => p.numero === avion.puertaAsignada);
-                if (puerta) { puerta.disponible = true; puerta.avionActual = null; }
-                avion.puertaAsignada = -1;
-                avion.estado = 'COMPLETADO';
-                avion.estadoDesc = 'Completado';
-                completadosDemo++;
-                addLog('AVION_COMPLETADO', 'Avión completó su ciclo', avion.id);
-            }
-        });
-
-        // Limpiar completados
-        avionesDemo = avionesDemo.filter(a => a.estado !== 'COMPLETADO');
-
-        // Actualizar UI
-        renderizarPistas(pistasDemo);
-        renderizarPuertas(puertasDemo);
-        renderizarAviones(avionesDemo);
-        actualizarEstadisticas({
-            pistasLibres: pistasDemo.filter(p => p.disponible).length,
-            puertasLibres: puertasDemo.filter(p => p.disponible).length,
-            esperandoPista: avionesDemo.filter(a => a.estado === 'ESPERANDO_PISTA').length,
-            avionesCompletados: completadosDemo,
-        });
-        actualizarStatusPill(true);
-    }
-
-    setInterval(tick, 1200);
-}
-
-// ══════════════════════════════════════════════════
+// ═══════════════════════════════════════════════
 //  UTILIDADES
-// ══════════════════════════════════════════════════
+// ═══════════════════════════════════════════════
 
 /**
- * Hace una petición POST a la API del servidor Java.
+ * Realiza un POST JSON a la API REST de Spring Boot.
  *
- * @param {string} endpoint - Ruta del endpoint
- * @param {Object} body     - Cuerpo de la petición (opcional)
+ * @param {string} url  - Endpoint relativo (ej: /api/iniciar)
+ * @param {Object} body - Body opcional
  */
-async function apiPost(endpoint, body) {
+async function post(url, body) {
     try {
-        const opciones = {
+        await fetch(url, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-        };
-        if (body) opciones.body = JSON.stringify(body);
-        const resp = await fetch(`${API_BASE}${endpoint}`, opciones);
-        return await resp.json();
-    } catch (err) {
-        console.warn('Error en API:', endpoint, err.message);
+            body: body ? JSON.stringify(body) : undefined
+        });
+    } catch (e) {
+        console.warn('Error en POST', url, e.message);
     }
 }
 
 /**
- * Retorna la hora actual en formato HH:mm:ss.mmm
+ * Muestra placeholders visuales mientras conecta.
  */
-function ahora() {
-    return new Date().toTimeString().slice(0, 8) + '.' +
-        String(new Date().getMilliseconds()).padStart(3, '0');
-}
+function renderPlaceholders() {
+    // Usar renderPistas en lugar de renderRunways
+    renderPistas([1, 2].map(n => ({
+        number: n,
+        available: true,
+        idPlane: null,
+        namePlane: null,
+        usesTotal: 0
+    })));
 
-// Enviar con Enter en el campo de nombre
-document.addEventListener('DOMContentLoaded', () => {
-    const input = document.getElementById('nombreAvion');
-    if (input) {
-        input.addEventListener('keydown', e => {
-            if (e.key === 'Enter') agregarAvion();
-        });
-    }
-});
+    // Usar renderPuertas en lugar de renderGates
+    renderPuertas([1, 2, 3].map(n => ({
+        number: n,
+        available: true,
+        idPlane: null,
+        namePlane: null
+    })));
+}

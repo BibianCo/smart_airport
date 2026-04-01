@@ -18,6 +18,6 @@ public class AirportStateDTO {
     private List<PlaneDTO> planes;
     private StatisticsDTO statistics;
     private List<EventLogDTO> log;
-    private boolean sumulationActive;
+    private boolean simulationActive;
 
 }
