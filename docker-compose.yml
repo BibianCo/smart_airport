@@ -1,0 +1,76 @@
+services:
+
+  # ── Servicio principal: AeroSim Spring Boot ──────────────────────
+  aerosim:
+    # Construir la imagen desde el Dockerfile en el directorio actual
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    # Nombre del contenedor (más fácil de identificar en docker ps)
+    container_name: aerosim-app
+
+    # Mapeo de puertos: HOST:CONTENEDOR
+    # Acceder en el navegador: http://localhost:8080
+    ports:
+      - "8080:8080"
+
+    # ── Variables de entorno (sobreescriben application.properties) ──
+    environment:
+      SERVER_PORT: 8080
+      # Usamos la convención de Spring para variables de entorno:
+      # airport.num-runways  =>  AIRPORT_NUM-RUNWAYS  =>  AIRPORT_NUM_RUNWAYS
+      AIRPORT_NUM_RUNWAYS: 3
+      AIRPORT_NUM_GATES: 5
+      AIRPORT_TIEMPO_MIN_RUNWAY_MS: 2000
+      AIRPORT_TIEMPO_MAX_RUNWAY_MS: 5000
+      AIRPORT_TIEMPO_MIN_GATE_MS: 3000
+      AIRPORT_TIEMPO_MAX_GATE_MS: 8000
+      AIRPORT_INTERVALO_MIN_LLEGADA_MS: 1000
+      AIRPORT_INTERVALO_MAX_LLEGADA_MS: 3000
+      JAVA_OPTS: "-XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0"
+
+    # ── Límites de recursos del contenedor ───────────────────────────
+    deploy:
+      resources:
+        limits:
+          # Máximo 512 MB de RAM para el contenedor
+          memory: 512M
+          # Máximo 1 CPU
+          cpus: "1.0"
+        reservations:
+          # Garantía mínima de recursos
+          memory: 256M
+          cpus: "0.5"
+
+    # ── Health check ─────────────────────────────────────────────────
+    # Docker Compose espera a que el contenedor esté "healthy"
+    # antes de marcarlo como listo.
+    healthcheck:
+      test: [ "CMD", "wget", "-qO-", "http://localhost:8080/api/state" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+    # ── Política de reinicio ──────────────────────────────────────────
+    # unless-stopped: reinicia automáticamente si falla,
+    # pero no si fue detenido manualmente con docker stop.
+    restart: unless-stopped
+
+    # ── Configuración de logs ─────────────────────────────────────────
+    logging:
+      driver: "json-file"
+      options:
+        # Máximo 10 MB por archivo de log
+        max-size: "10m"
+        # Máximo 3 archivos rotados
+        max-file: "3"
+
+# ── Red personalizada ─────────────────────────────────────────────
+# Aísla el contenedor en su propia red bridge.
+# Útil si en el futuro se agrega una base de datos u otros servicios.
+networks:
+  default:
+    name: aerosim-network
+    driver: bridge
