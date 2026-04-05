@@ -27,13 +27,28 @@ function iniciarPolling() {
 }
 
 function actualizarUI(d) {
+    // 1. Renderizar lo básico
     renderPistas(d.runways || []);
     renderPuertas(d.gates || []);
-    renderVuelos(d.planes || []);
+
+    // 2. Renderizar aviones (Si falla aquí es porque el DTO en Java está vacío)
+    if (typeof renderVuelos === "function") {
+        renderVuelos(d.planes || []);
+    }
+
     renderMetricas(d.statistics || {});
+
+    // 3. Actualizar el log (Asegúrate de tener UNA SOLA función appendLog)
     appendLog(d.log || []);
+
     actualizarStatus(d.simulationActive);
     actualizarBotones(d.simulationActive);
+
+    // 4. Actualizar semáforo de forma segura
+    const sem = document.getElementById('badgeSemforoPuertas');
+    if (sem) {
+        sem.textContent = `SEMÁFORO DE CONTEO: ${d.gatePermits ?? 0} PERMISOS`;
+    }
 }
 
 // ── RENDERIZADO DE RECURSOS ──
@@ -69,7 +84,6 @@ function renderPuertas(puertas) {
 }
 
 // ── RENDERIZADO DE VUELOS (Hilos) ──
-
 function renderVuelos(aviones) {
     const lista = document.getElementById('flightList');
     const badge = document.getElementById('badgeVuelos');
@@ -80,57 +94,82 @@ function renderVuelos(aviones) {
         return;
     }
 
-    lista.innerHTML = aviones.map(a => {
-        // CORRECCIÓN 1: Usar 'statusDesc' para el mapeo de emojis/colores
-        const estadoInfo = getEstadoDetalle(a.statusDesc);
-
-        return `
+    lista.innerHTML = aviones.map(a => `
         <div class="flight-item">
             <span class="fi-id">${a.idPlane}</span>
             <span class="fi-name">${a.namePlane}</span>
-            <span class="fi-badge ${estadoInfo.clase}">${estadoInfo.texto}</span>
-            <span class="fi-res">
-                ${a.runwayNumber !== -1 ? 'Pista: ' + a.runwayNumber : ''} 
-                ${a.gateNumber !== -1 ? ' Puerta: ' + a.gateNumber : ''}
-            </span>
-        </div>`;
-    }).join('');
+            <span class="fi-badge state-${a.statusDesc}">${a.status}</span>
+            <span class="fi-res">P:${a.runwayNumber || '—'} / G:${a.gateNumber || '—'}</span>
+        </div>`).join('');
+}
+
+// USA UNA SOLA VARIABLE GLOBAL
+let sistemaPausadoPorError = false; // Asegúrate de que este nombre coincida en todo el archivo
+
+function appendLog(logs) {
+    const container = document.getElementById('logScroll');
+    if (!container || !logs || logs.length === 0 || sistemaPausadoPorError) return;
+    const isAtBottom = container.scrollHeight - container.clientHeight <= container.scrollTop + 1;
+    let htmlAcumulado = "";
+
+    logs.forEach(evento => {
+        const time = evento.timestamp ? evento.timestamp.split('.')[0] : "";
+        const msg = evento.message || evento.description || "";
+        const tipo = (evento.type || "INFO").toUpperCase();
+
+        // DETECCIÓN DEL ERROR CRÍTICO
+        if (tipo === "RACE_CONDITION" || tipo === "CRITICAL") {
+
+            htmlAcumulado += `
+                <div class="log-entry log-error pulse-animation">
+                    <span class="log-ts">${time}</span>
+                    <span class="log-msg"><strong>[CONFLICTO]</strong> ${msg}</span>
+                </div>`;
+        } else {
+            htmlAcumulado += `
+                <div class="log-entry log-${tipo}">
+                    <span class="log-ts">${time}</span>
+                    <span class="log-msg">${msg}</span>
+                </div>`;
+        }
+    });
+
+    container.innerHTML = htmlAcumulado;
+    container.scrollTop = container.scrollHeight;
+    if (isAtBottom) {
+        container.scrollTop = container.scrollHeight;
+    }
+}
+
+
+function reincorporarSistema() {
+    const modal = document.getElementById("modalCarrera");
+    if (modal) modal.remove();
+
+    document.querySelector('.app-layout').style.filter = 'none';
+    sistemaPausadoPorError = false;
+
+    // Reiniciamos el polling
+    iniciarPolling();
 }
 
 function getEstadoDetalle(estado) {
     const mapa = {
-        'WAITING_FOR_LANDING': { texto: 'ESPERANDO PISTA', clase: 'state-ESPERANDO_PISTA' },
-        'LANDING': { texto: 'ATERRIZANDO', clase: 'state-EN_PISTA' },
-        'TOWARDS_GATE': { texto: 'RODANDO', clase: 'state-HACIA_PUERTA' },
-        'AT_GATE': { texto: 'EN PUERTA', clase: 'state-EN_PUERTA' },
-        'WAITING_FOR_TAKEOFF': { texto: 'PREPARANDO SALIDA', clase: 'state-ESPERANDO_PISTA' },
-        'TAKEOFF': { texto: 'DESPEGANDO', clase: 'state-EN_PISTA' },
-        'COMPLETED': { texto: 'FINALIZADO', clase: 'state-COMPLETADO' }
+        'WAITING_FOR_LANDING': { texto: 'EN COLA (LLEGADA)', clase: 'state-espera' },
+        'LANDING': { texto: 'ATERRIZANDO', clase: 'state-pista' },
+        'TOWARDS_GATE': { texto: 'RODANDO A PUERTA', clase: 'state-rodaje' },
+        'AT_GATE': { texto: 'EN ESTACIÓN', clase: 'state-puerta' },
+        'WAITING_FOR_TAKEOFF': { texto: 'COLA (DESPEGUE)', clase: 'state-espera' },
+        'TAKEOFF': { texto: 'DESPEGANDO', clase: 'state-pista' },
+        'COMPLETED': { texto: 'VUELO FINALIZADO', clase: 'state-ok' },
+        'LOCKED': { texto: 'DEADLOCK!', clase: 'state-deadlock' } // Para el punto 2
     };
     return mapa[estado] || { texto: estado, clase: '' };
 }
 
 // ── LOG Y MÉTRICAS ──
 
-function appendLog(logs) {
-    const container = document.getElementById('logScroll');
-    if (!logs || logs.length === 0) return;
 
-    container.innerHTML = logs.map(evento => {
-        const time = evento.timestamp ? evento.timestamp.split('.')[0] : "";
-        const msg = evento.message || "Evento de sistema";
-        const tipo = evento.type || "INFO";
-        const avion = evento.idPlane ? `[${evento.idPlane}] ` : "";
-
-        return `
-            <div class="log-entry log-${tipo.toUpperCase()}">
-                <span class="log-ts">${time}</span>
-                <span class="log-msg"><strong>${avion}</strong>${msg}</span>
-            </div>
-        `;
-    }).join('');
-    container.scrollTop = container.scrollHeight;
-}
 
 function renderMetricas(s) {
     document.getElementById('mPistasLibres').textContent = s.runwayFree ?? '0';
@@ -152,8 +191,9 @@ function actualizarStatus(activo) {
 }
 
 function actualizarBotones(activo) {
-    document.getElementById('btnIniciar').disabled = activo;
-    document.getElementById('btnDetener').disabled = !activo;
+    // 🔥 NUNCA se desactiva
+    document.getElementById('btnIniciar').disabled = false;
+
 }
 
 // ── ACCIONES API ──
@@ -174,7 +214,10 @@ async function agregarAvion() {
     await post('/api/plane', { name: name });
 }
 
-async function demostrarCarrera() { await post('/api/race_condition'); }
+async function demostrarCarrera() {
+    await fetch('/api/race_condition', { method: 'POST' });
+}
+
 function setAerolinea(n) { document.getElementById('nombreAvion').value = n; }
 function limpiarLog() { document.getElementById('logScroll').innerHTML = ''; }
 

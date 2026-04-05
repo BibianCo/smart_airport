@@ -114,6 +114,7 @@ public class AirportController {
                                 .statistics(statistics)
                                 .log(logDTO)
                                 .simulationActive(airportService.isSimulationActive())
+                                .gatePermits(airportService.getGatesAvailable())
                                 .build();
 
                 return ResponseEntity.ok(response);
@@ -185,7 +186,7 @@ public class AirportController {
         public ResponseEntity<SimpleRequest> startRaceCondition() {
                 airportService.demonstrateRaceCondition();
                 return ResponseEntity.ok(SimpleRequest.success(
-                                "Demostración de condición de carrera iniciada. Revisa el log de eventos para ver los resultados."));
+                                "Demostración de condición de carrera iniciada."));
         }
 
         /**

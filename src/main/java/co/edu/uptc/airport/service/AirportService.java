@@ -7,6 +7,7 @@ import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.springframework.stereotype.Service;
+import org.thymeleaf.spring6.expression.Themes;
 
 import co.edu.uptc.airport.config.AirportProperties;
 import co.edu.uptc.airport.model.*;
@@ -184,6 +185,36 @@ public class AirportService {
         boolean gatePermitAcquired = false;
 
         try {
+            long startTime = System.currentTimeMillis();
+            plane.setStatePlane(AirplaneState.WAITING_FOR_LANDING);
+
+            // --- FASE 0: ADQUISICIÓN DE RECURSOS (PREVENCIÓN DE DEADLOCK) ---
+            while (runway == null || !gatePermitAcquired) {
+
+                // Verificación de tiempo para alerta visual de Deadlock
+                if (System.currentTimeMillis() - startTime > 10000) {
+                    plane.setStatePlane(AirplaneState.LOCKED);
+                }
+
+                if (!gatePermitAcquired) {
+                    gatePermitAcquired = gateSemaphore.tryAcquire();
+                }
+
+                if (gatePermitAcquired) {
+                    runway = findAndAcquireRunway(plane);
+                    if (runway == null) {
+                        // Si no hay pista, liberamos el permiso de puerta para evitar bloqueo circular
+                        gateSemaphore.release();
+                        gatePermitAcquired = false;
+                    }
+                }
+
+                // Si no logramos ambos, esperamos un poco antes de reintentar
+                if (runway == null) {
+                    Thread.sleep(500);
+                }
+            }
+
             // --- FASE 1: ATERRIZAJE (Sincronización Compuesta) ---
             plane.setStatePlane(AirplaneState.WAITING_FOR_LANDING); // Nuevo Estado
             while (runway == null || !gatePermitAcquired) {
@@ -374,83 +405,106 @@ public class AirportService {
 
         registerEvent(EventType.RACE_CONDITION, "Demostrando condición de carrera", null);
 
-        unsafeResource = 0;
-        secureResource = 0;
+        Runway runway = runways.get(0); // Usamos la primera pista como recurso compartido
 
-        int numThreads = 5;
-        int iterations = 1000;
+        runway.isAvailable();
 
-        // Hilos sin protección (condición de carrera)
-        List<Thread> fenceless = new ArrayList<>();
-        for (int i = 0; i < numThreads; i++) {
-            final int num = i;
-            fenceless.add(new Thread(() -> {
-                for (int j = 0; j < iterations; j++) {
-                    int read = unsafeResource; // lectura
-                    // Pausa mínima: aumenta probabilidad de que otro hilo lea el mismo valor
-                    try {
-                        Thread.sleep(0, 1);
-                    } catch (InterruptedException ignored) {
-                    }
-                    unsafeResource = read + 1; // escritura (NO atómica en conjunto)
-                }
-                registerEvent(EventType.RACE_CONDITION,
-                        String.format("Hilo-Sin-%d terminó. Valor sin protección: %d (esperado: %d)",
-                                num, unsafeResource, numThreads * iterations),
-                        null);
-            }, "Carrera-Sin-" + i));
-        }
+        // ── PARTE 1: SIN exclusión mutua ─────────────────────────────
+        // Dos hilos leen que la pista está libre y los dos intentan ocuparla.
+        // El sleep(50) entre lectura y escritura aumenta la ventana de carrera,
+        // simulando que el SO cambia de contexto justo en ese instante.
 
-        // Hilos con protección (exclusión mutua)
-        List<Thread> fenced = new ArrayList<>();
-        for (int i = 0; i < numThreads; i++) {
-            final int num = i;
-            fenced.add(new Thread(() -> {
-                for (int j = 0; j < iterations; j++) {
-                    synchronized (lockSeguro) {
-                        secureResource++; // operación atómica gracias a la sincronización
-                    }
-                }
-                registerEvent(EventType.INFO,
-                        String.format("Hilo-Con-%d terminó. Valor con protección: %d (esperado: %d)",
-                                num, secureResource, numThreads * iterations),
-                        null);
-            }, "Carrera-Con-" + i));
-        }
-
-        // Iniciar todos los hilos
-        fenceless.forEach(Thread::start);
-        fenced.forEach(Thread::start);
-
-        // Monitor para reportar resultado final
-        new Thread(() -> {
+        Runnable indefensible = () -> {
             try {
-                // Esperar a que todos los hilos terminen
-                for (Thread t : fenceless)
-                    t.join();
-                for (Thread t : fenced)
-                    t.join();
+                String namePlane = Thread.currentThread().getName();
 
-                int esperado = numThreads * iterations;
                 registerEvent(EventType.RACE_CONDITION,
-                        String.format("RESULTADO — Sin protección: %d | Con protección: %d | Esperado: %d",
-                                unsafeResource, secureResource, esperado),
-                        null);
+                        "SISTEMA: " + namePlane + " detecta Pista 1 LIBRE. Iniciando aproximación...", namePlane);
 
-                if (unsafeResource < esperado) {
-                    registerEvent(EventType.RACE_CONDITION,
-                            "CARRERA DETECTADA: se perdieron " + (esperado - unsafeResource)
-                                    + " incrementos por falta de exclusión mutua",
-                            null);
-                }
-                registerEvent(EventType.INFO,
-                        "EXCLUSIÓN MUTUA: recurso protegido = " + secureResource
-                                + " (valor correcto garantizado)",
-                        null);
+                // VENTANA DE CARRERA: pausa entre leer y escribir.
+                // Aquí el SO puede cambiar de hilo → ambos habrán leído "libre"
+                Thread.sleep(100);
+
+                // ESCRITURA: ambos hilos llegan aquí creyendo que la pista está libre
+                // y los dos sobreescriben pista1.avionActual sin ninguna protección
+                runway.assignPlane(new Plane(namePlane, namePlane));
+
+                registerEvent(EventType.RACE_CONDITION,
+                        "CONFLICTO: " + namePlane + " ha tomado la Pista 1 sobreescribiendo cualquier dato previo!",
+                        namePlane);
+
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
-        }, "Monitor-Final").start();
+        };
+
+        Thread planeAvianca = new Thread(indefensible, "Avianca");
+        Thread planeLatam = new Thread(indefensible, "Latam");
+
+        planeAvianca.start();
+        planeLatam.start();
+
+        // Esperar que ambos terminen y mostrar el resultado de la carrera
+
+        new Thread(() -> {
+            try {
+                planeAvianca.join();
+                planeLatam.join();
+
+                Plane finalPlane = runway.getPlaneActual();
+                registerEvent(EventType.RACE_CONDITION, "RESULTADO SIN PROTECCIÓN: Pista 1 quedó con: "
+                        + (finalPlane != null ? finalPlane.getIdPlane() : "NULL")
+                        + " Uno de los dos aviones fue SOBREESCRITO y perdido", null);
+
+                // ── PARTE 2: CON exclusión mutua ─────────────────────────
+                // La misma operación, pero protegida con synchronized.
+                // Solo un hilo entra a la sección crítica a la vez →
+                // el segundo espera → no hay sobreescritura.
+
+                runway.release(); // Liberamos la pista para la siguiente prueba
+
+                registerEvent(EventType.RACE_CONDITION, "Ahora con EXCLUSIÓN MUTUA (synchronized)", null);
+
+                Runnable defensible = () -> {
+                    String namePlane = Thread.currentThread().getName();
+
+                    synchronized (runway) {
+                        try {
+                            if (runway.getPlaneActual() == null) {
+                                Thread.sleep(50); // Simula ventana de carrera, pero ahora el otro hilo no puede entrar
+                                runway.assignPlane(new Plane(namePlane, namePlane));
+                                registerEvent(EventType.RACE_CONDITION,
+                                        namePlane + " ocupó pista1 correctamente (protegido)",
+                                        namePlane);
+                            } else {
+                                registerEvent(EventType.RACE_CONDITION,
+                                        namePlane + " intentó ocupar pista1 pero ya estaba ocupada por "
+                                                + runway.getPlaneActual().getIdPlane(),
+                                        namePlane);
+                            }
+
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                        }
+
+                    }
+                };
+
+                Thread plane1 = new Thread(defensible, "Avi-P1");
+                Thread plane2 = new Thread(defensible, "Avi-P2");
+                plane1.start();
+                plane2.start();
+                plane1.join();
+                plane2.join();
+
+                registerEvent(EventType.RACE_CONDITION, "RESULTADO CON PROTECCIÓN : Pista 1 quedó con: "
+                        + runway.getPlaneActual().getIdPlane() + "Segundo avión detectó pista ocupada correctamente",
+                        null);
+
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }, "Monitor-Demo-Carrera").start();
 
     }
 

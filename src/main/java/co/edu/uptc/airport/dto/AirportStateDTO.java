@@ -19,5 +19,6 @@ public class AirportStateDTO {
     private StatisticsDTO statistics;
     private List<EventLogDTO> log;
     private boolean simulationActive;
+    private long gatePermits;
 
 }

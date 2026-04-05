@@ -63,9 +63,6 @@
                     <button class="btn btn-go" id="btnIniciar" onclick="iniciarSimulacion()">
                         <span class="btn-dot green"></span>INICIAR SIMULACIÓN
                     </button>
-                    <button class="btn btn-stop" id="btnDetener" onclick="detenerSimulacion()" disabled>
-                        <span class="btn-dot red"></span>DETENER
-                    </button>
                     <button class="btn btn-reset" onclick="reiniciarSimulacion()">
                         <span class="btn-dot amber"></span>REINICIAR SISTEMA
                     </button>
@@ -78,7 +75,7 @@
                 <div class="flight-input-row">
                     <input type="text" id="nombreAvion" class="flight-input" placeholder="Aerolínea..." maxlength="20"
                         onkeydown="if(event.key==='Enter') agregarAvion()">
-                    <button class="btn-add" onclick="agregarAvion()">ADD</button>
+                    <button class="btn-add" onclick="agregarAvion()">Agregar avion</button>
                 </div>
                 <div class="chips-row">
                     <button class="chip" onclick="setAerolinea('Avianca')">Avianca</button>
@@ -140,7 +137,7 @@
             <section class="resource-section">
                 <div class="section-head">
                     <span class="section-title">PUERTAS DE EMBARQUE</span>
-                    <span class="section-badge amber">SEMÁFORO DE CONTEO</span>
+                    <span class="section-badge amber" id="badgeSemforoPuertas">SEMÁFORO: 5 LIBRES</span>
                 </div>
                 <div id="puertasGrid" class="gates-grid"></div>
             </section>
