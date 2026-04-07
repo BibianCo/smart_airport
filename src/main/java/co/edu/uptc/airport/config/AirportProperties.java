@@ -1,9 +1,10 @@
 package co.edu.uptc.airport.config;
 
-import lombok.Getter;
-import lombok.Setter;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
+
+import lombok.Getter;
+import lombok.Setter;
 
 /**
  * Clase de configuración que mapea las propiedades del archivo
@@ -51,11 +52,5 @@ public class AirportProperties {
 
     /** Tiempo máximo de estancia en puerta en ms (airport.tiempo-max-gate-ms) */
     private int tiempoMaxGateMs = 8000;
-
-    /** Intervalo mínimo entre llegadas de aviones en simulación automática (ms) */
-    private int intervaloMinLlegadaMs = 1000;
-
-    /** Intervalo máximo entre llegadas de aviones en simulación automática (ms) */
-    private int intervaloMaxLlegadaMs = 3000;
 
 }

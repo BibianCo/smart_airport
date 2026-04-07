@@ -5,12 +5,17 @@ import java.util.List;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.ReentrantLock;
 
 import org.springframework.stereotype.Service;
-import org.thymeleaf.spring6.expression.Themes;
 
 import co.edu.uptc.airport.config.AirportProperties;
-import co.edu.uptc.airport.model.*;
+import co.edu.uptc.airport.model.AirplaneState;
+import co.edu.uptc.airport.model.EventType;
+import co.edu.uptc.airport.model.EventoLog;
+import co.edu.uptc.airport.model.Gate;
+import co.edu.uptc.airport.model.Plane;
+import co.edu.uptc.airport.model.Runway;
 import jakarta.annotation.PostConstruct;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
@@ -99,7 +104,7 @@ public class AirportService {
 
     /** Recurso con exclusión mutua correcta */
     private int secureResource;
-    private final Object lockSeguro = new Object();
+    private final ReentrantLock lock = new ReentrantLock();
 
     public AirportService(AirportProperties properties) {
         this.properties = properties;
@@ -194,6 +199,7 @@ public class AirportService {
                 // Verificación de tiempo para alerta visual de Deadlock
                 if (System.currentTimeMillis() - startTime > 10000) {
                     plane.setStatePlane(AirplaneState.LOCKED);
+                    registerEvent(EventType.DEADLOCK_DETECTED, "Deadlock ", plane.getIdPlane());
                 }
 
                 if (!gatePermitAcquired) {
@@ -333,27 +339,6 @@ public class AirportService {
      */
     private int randomTime(int min, int max) {
         return min + (int) (Math.random() * (max - min));
-    }
-
-    // SIMULACIÓN
-
-    /**
-     * Inicia la simulación generando aviones periódicamente.
-     */
-    public void startSimulation() {
-
-        simulationActive = true;
-        registerEvent(EventType.INFO, "Simulación automática iniciada", null);
-        log.info("Simulación iniciada");
-    }
-
-    /**
-     * Detiene la simulación.
-     */
-    public void stopSimulation() {
-        simulationActive = false;
-        registerEvent(EventType.INFO, "Simulación automática detenida", null);
-        log.info("Simulación detenida");
     }
 
     /**
@@ -514,10 +499,18 @@ public class AirportService {
      * Registra un evento en el sistema.
      */
     private void registerEvent(EventType tipo, String mensaje, String avionId) {
-        logEventos.add(new EventoLog(tipo, mensaje, avionId));
+        lock.lock(); // 1. Entrada a la sección crítica: El hilo adquiere el permiso exclusivo
+        try {
+            // 2. Sección Crítica: Solo UN hilo a la vez puede ejecutar estas líneas
+            logEventos.add(new EventoLog(tipo, mensaje, avionId));
 
-        if (logEventos.size() > 200) {
-            logEventos.remove(0);
+            // Mantenimiento de la estructura de datos compartida
+            if (logEventos.size() > 200) {
+                logEventos.remove(0);
+            }
+        } finally {
+            // 3. Salida: Se libera el cerrojo pase lo que pase (incluso si hay error)
+            lock.unlock();
         }
     }
 
@@ -564,16 +557,6 @@ public class AirportService {
         return planes.stream()
                 .filter(a -> a.getStatePlane() == AirplaneState.WAITING_FOR_LANDING)
                 .count();
-    }
-
-    /**
-     * Retorna la configuración de aerolíneas para la simulación.
-     */
-    public String[] getAirlines() {
-        return new String[] {
-                "AeroCol", "Latam", "Avianca", "Copa", "Wingo",
-                "EasyFly", "JetBlue", "Delta", "American", "United"
-        };
     }
 
     public AirportProperties getAirportProperties() {

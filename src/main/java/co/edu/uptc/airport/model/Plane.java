@@ -29,9 +29,6 @@ public class Plane {
     /** Número de pista asignada (-1 si ninguna) */
     private volatile int assignedRunway;
 
-    /** Instante de creación para calcular tiempos de espera si es necesario */
-    private final Instant creationPlane;
-
     public Plane(String idPlane, String namePlane) {
         this.idPlane = idPlane;
         this.namePlane = namePlane;
@@ -39,7 +36,6 @@ public class Plane {
         this.statePlane = AirplaneState.WAITING_FOR_LANDING;
         this.assignedDoor = -1;
         this.assignedRunway = -1;
-        this.creationPlane = Instant.now();
     }
 
     // --- SETTERS SINCRONIZADOS ---
@@ -80,7 +76,4 @@ public class Plane {
         return assignedRunway;
     }
 
-    public Instant getCreationPlane() {
-        return creationPlane;
-    }
 }

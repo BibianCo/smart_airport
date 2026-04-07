@@ -181,13 +181,10 @@ function renderMetricas(s) {
 function actualizarStatus(activo) {
     const blk = document.getElementById('statusBlock');
     const txt = document.getElementById('statusText');
-    if (activo) {
-        blk.classList.add('active');
-        txt.textContent = 'SIMULACIÓN ACTIVA';
-    } else {
-        blk.classList.remove('active');
-        txt.textContent = 'SISTEMA DETENIDO';
-    }
+
+    blk.classList.add('active');
+    txt.textContent = 'SIMULACIÓN ACTIVA';
+
 }
 
 function actualizarBotones(activo) {
@@ -198,8 +195,7 @@ function actualizarBotones(activo) {
 
 // ── ACCIONES API ──
 
-async function iniciarSimulacion() { await post('/api/start'); }
-async function detenerSimulacion() { await post('/api/stop'); }
+
 async function reiniciarSimulacion() {
     if (confirm('¿Reiniciar aeropuerto?')) {
         await post('/api/reset');

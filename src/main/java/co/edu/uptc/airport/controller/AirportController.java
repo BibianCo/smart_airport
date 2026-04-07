@@ -122,29 +122,6 @@ public class AirportController {
         }
 
         /**
-         * Inicia la generación automática de aviones.
-         *
-         * @return Confirmación de la operación
-         */
-        @PostMapping("/start")
-        public ResponseEntity<SimpleRequest> startSimulation() {
-                airportService.startSimulation();
-                return ResponseEntity.ok(SimpleRequest.success("Simulación iniciada correctamente"));
-        }
-
-        /**
-         * Detiene la generación automática de aviones.
-         * Los aviones ya en ciclo continúan hasta completar.
-         *
-         * @return Confirmación de la operación
-         */
-        @PostMapping("/stop")
-        public ResponseEntity<SimpleRequest> stopSimulation() {
-                airportService.stopSimulation();
-                return ResponseEntity.ok(SimpleRequest.success("Simulación detenida correctamente"));
-        }
-
-        /**
          * Reinicia completamente el sistema del aeropuerto.
          *
          * @return Confirmación de la operación
